@@ -1,0 +1,22 @@
+[
+  {
+    "job": {
+      "platform": "x",
+      "usernames": ["eliz883"]
+    },
+    "start_date": "2026-05-26T06:09:07+00:00",
+    "end_date": "2026-05-27T06:09:07+00:00",
+    "limit": 100,
+    "keyword_mode": "any",
+    "ttl_minutes": 2
+  },
+  {
+    "job": {
+      "platform": "x",
+      "keywords": ["#bittensor", "#tao"]
+    },
+    "limit": 75,
+    "keyword_mode": "any",
+    "ttl_minutes": 10
+  }
+]

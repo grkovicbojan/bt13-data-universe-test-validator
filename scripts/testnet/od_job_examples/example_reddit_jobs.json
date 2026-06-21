@@ -1,0 +1,23 @@
+[
+  {
+    "job": {
+      "platform": "reddit",
+      "keywords": ["todayilearned"]
+    },
+    "start_date": "2026-05-22T00:00:00+00:00",
+    "end_date": "2026-05-26T00:00:00+00:00",
+    "limit": 3,
+    "keyword_mode": "any",
+    "ttl_minutes": 2
+  },
+  {
+    "job": {
+      "platform": "reddit",
+      "subreddit": "MachineLearning",
+      "keywords": ["llm", "chatgpt"]
+    },
+    "limit": 50,
+    "keyword_mode": "all",
+    "ttl_minutes": 5
+  }
+]

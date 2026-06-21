@@ -1,0 +1,23 @@
+{
+  "proxies": [
+    {
+      "protocol": "http",
+      "ip": "203.0.113.10",
+      "port": 8080,
+      "username": "your_username",
+      "password": "your_password"
+    },
+    {
+      "protocol": "socks5",
+      "ip": "203.0.113.11",
+      "port": 1080,
+      "username": "your_username",
+      "password": "your_password"
+    },
+    {
+      "protocol": "https",
+      "ip": "203.0.113.12",
+      "port": 8443
+    }
+  ]
+}

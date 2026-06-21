@@ -1,0 +1,28 @@
+[
+  {
+    "job": {
+      "platform": "reddit",
+      "subreddit": null,
+      "usernames": null,
+      "keywords": ["todayilearned"]
+    },
+    "start_date": "2026-05-22T00:00:00+00:00",
+    "end_date": "2026-05-26T00:00:00+00:00",
+    "limit": 3,
+    "keyword_mode": "any",
+    "ttl_minutes": 2
+  },
+  {
+    "job": {
+      "platform": "x",
+      "usernames": ["eliz883"],
+      "keywords": null,
+      "url": null
+    },
+    "start_date": "2026-05-26T06:09:07+00:00",
+    "end_date": "2026-05-27T06:09:07+00:00",
+    "limit": 100,
+    "keyword_mode": "any",
+    "ttl_minutes": 2
+  }
+]

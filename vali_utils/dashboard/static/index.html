@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Universe — Validator Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/static/style.css?v=11" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Data Universe Validator Dashboard</h1>
+    <div id="health-badge" class="status-badge unhealthy">
+      <span class="dot"></span>Connecting…
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar panel">
+      <div class="panel-header">Settings</div>
+      <div class="panel-body">
+        <label for="target-miner">Target Miner(s)</label>
+        <select id="target-miner" multiple size="5"></select>
+        <small style="color:var(--muted)">Hold Ctrl/Cmd to select multiple. Empty = all miners.</small>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="skip-s3" />
+          <label for="skip-s3" style="margin:0">Skip S3 / parquet validation</label>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="skip-p2p" />
+          <label for="skip-p2p" style="margin:0">Skip P2P / miner index validation</label>
+        </div>
+        <small style="color:var(--muted)">When on, skips index fetch and bucket/scraper checks. S3 and OD still run.</small>
+
+        <label style="margin-top:1rem;font-weight:600;color:var(--text)">Validation depth</label>
+        <small style="color:var(--muted);display:block;margin-bottom:0.25rem">
+          Full mode is slower; use on local testnet only.
+        </small>
+
+        <label for="p2p-validation-mode">P2P scraper check</label>
+        <select id="p2p-validation-mode">
+          <option value="sample">Sample (1–2 entities per bucket)</option>
+          <option value="full">Full (all entities in bucket)</option>
+        </select>
+        <small style="color:var(--muted)">Basic/uniqueness always checks the full bucket.</small>
+
+        <label for="s3-validation-mode">S3 / parquet check</label>
+        <select id="s3-validation-mode">
+          <option value="sample">Sample (~10% of files)</option>
+          <option value="full">Full (all active job files)</option>
+        </select>
+
+        <label for="od-validation-mode">On-demand check</label>
+        <select id="od-validation-mode">
+          <option value="sample">Sample (3 jobs, 5 entities, 1 scraper)</option>
+          <option value="full">Full (all jobs &amp; entities)</option>
+        </select>
+
+        <label for="s3-validation-interval">S3 validation interval (minutes)</label>
+        <input type="number" id="s3-validation-interval" min="1" max="1440" value="120" />
+        <small style="color:var(--muted)">How often to re-validate miner parquet uploads (~12s/block).</small>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="relax-weight-caps" checked />
+          <label for="relax-weight-caps" style="margin:0">Relax P2P weight caps (local testnet)</label>
+        </div>
+        <small style="color:var(--muted)">When on, P2P counts toward Capped/Local Incentive without S3/OD.</small>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="eval-paused" />
+          <label for="eval-paused" style="margin:0">Pause evaluation loop</label>
+        </div>
+
+        <label for="eval-batch-size">Eval batch size</label>
+        <input type="number" id="eval-batch-size" min="1" max="50" value="5" />
+
+        <label for="target-eval-interval">Target miner eval interval (seconds)</label>
+        <input type="number" id="target-eval-interval" min="60" max="3600" value="300" />
+        <small style="color:var(--muted)">Use ≥300s with local testnet miner (rate limits).</small>
+
+        <label for="local-api-url">Local API URL (S3 replacement)</label>
+        <input type="text" id="local-api-url" value="http://localhost:8100" />
+        <div id="local-api-status" style="font-size:0.8rem;color:var(--muted);margin-top:0.25rem"></div>
+        <label for="local-api-data-dir">Local API data directory</label>
+        <input type="text" id="local-api-data-dir" readonly />
+        <small style="color:var(--muted)">Miner OD submissions: …/on_demand/submissions/</small>
+
+        <div class="btn-row">
+          <button id="save-settings">Save Settings</button>
+          <button id="trigger-eval" class="secondary">Evaluate Now</button>
+        </div>
+
+        <button type="button" id="reset-scores" class="danger" style="width:100%">
+          Reset All Scores
+        </button>
+        <small style="color:var(--muted)">
+          Clears local score, boosts, credibility, chart history, and validation failures.
+          Does not change on-chain incentive.
+        </small>
+      </div>
+    </aside>
+
+    <div class="content-area" style="grid-column: 2">
+      <div class="meta-row" id="meta-info"></div>
+      <div id="incentive-note" class="incentive-note"></div>
+
+      <div class="panel panel-primary">
+        <div class="panel-header panel-header-main">
+          <span>Miner Evaluation</span>
+          <div class="eval-controls">
+            <span id="eval-status-badge" class="eval-status-badge running">Running</span>
+            <button type="button" id="eval-start-btn" class="eval-btn-start">▶ Start</button>
+            <button type="button" id="eval-stop-btn" class="eval-btn-stop secondary">■ Stop</button>
+            <button type="button" id="eval-once-btn" class="secondary">Run Once</button>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="tab active" data-tab="tab-scores">Miner Scores</div>
+          <div class="tab" data-tab="tab-stats">Validation Stats</div>
+          <div class="tab" data-tab="tab-charts">Charts</div>
+          <div class="tab" data-tab="tab-failures">Validation Failures</div>
+          <div class="tab" data-tab="tab-od">On-Demand Jobs</div>
+        </div>
+
+        <div id="tab-scores" class="tab-content active panel-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>UID</th>
+                  <th>Hotkey</th>
+                  <th>Score</th>
+                  <th>Capped</th>
+                  <th>Local Incentive</th>
+                  <th>Chain Incentive</th>
+                  <th>Credibility</th>
+                  <th>S3 Boost</th>
+                  <th>OD Boost</th>
+                  <th>Scorable Bytes</th>
+                </tr>
+              </thead>
+              <tbody id="scores-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tab-stats" class="tab-content panel-body">
+          <div class="stats-toolbar">
+            <span id="stats-updated" class="muted-text">Last update: —</span>
+            <button type="button" id="refresh-stats" class="secondary">Refresh</button>
+          </div>
+          <h3 class="stats-section-title">Session totals (since validator start)</h3>
+          <div id="stats-session-grid" class="stats-path-grid"></div>
+          <h3 class="stats-section-title">Per-miner (latest evaluation)</h3>
+          <div class="table-wrap">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th>UID</th>
+                  <th>P2P Jobs</th>
+                  <th>P2P Entities</th>
+                  <th>S3 Jobs</th>
+                  <th>S3 Entities</th>
+                  <th>OD Jobs</th>
+                  <th>OD Entities</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="stats-miners-body"></tbody>
+            </table>
+          </div>
+          <div id="stats-miner-detail" class="stats-detail-panel"></div>
+        </div>
+
+        <div id="tab-charts" class="tab-content panel-body">
+          <div class="chart-controls">
+            <label for="chart-uid">Chart miner</label>
+            <select id="chart-uid"></select>
+            <span id="last-update" class="muted-text">Last update: —</span>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">Score &amp; Incentive Over Time</div>
+              <canvas id="chart-timeline"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Score Components (latest)</div>
+              <canvas id="chart-components"></canvas>
+            </div>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">Boosts &amp; Credibility</div>
+              <canvas id="chart-boosts"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">All Miners — Local Incentive Share</div>
+              <canvas id="chart-incentive-pie"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-failures" class="tab-content panel-body">
+          <p class="od-section-desc" style="margin-top:0">
+            Shows the validator&apos;s failure messages as recorded during P2P, S3, and on-demand checks.
+            Content mismatches include a side-by-side view of miner submission vs validator re-scrape.
+          </p>
+          <div class="failure-toolbar">
+            <label for="failure-type-filter">Type</label>
+            <select id="failure-type-filter">
+              <option value="">All</option>
+              <option value="p2p">P2P</option>
+              <option value="s3">S3</option>
+              <option value="od">On-Demand</option>
+            </select>
+            <label for="failure-uid-filter">UID</label>
+            <select id="failure-uid-filter">
+              <option value="">All miners</option>
+            </select>
+            <button type="button" id="refresh-failures" class="secondary">Refresh</button>
+            <button type="button" id="clear-validation-failures" class="danger">Clear History</button>
+            <span id="failures-count" class="muted-text"></span>
+          </div>
+          <small class="muted-text failure-clear-hint">
+            Clears in-memory failure reports only. Does not reset scores or validation stats.
+          </small>
+          <div id="failures-list" class="failures-list">
+            <p class="muted-text">No validation failures recorded yet.</p>
+          </div>
+        </div>
+
+        <div id="tab-od" class="tab-content panel-body od-tab">
+          <section class="od-section">
+            <h3 class="od-section-title">Create Manual OD Job</h3>
+            <p class="od-section-desc">Enter platform and keywords directly for a single on-demand job.</p>
+            <div class="od-form-grid">
+              <div>
+                <label for="manual-od-platform">Platform</label>
+                <select id="manual-od-platform">
+                  <option value="x">X (Twitter)</option>
+                  <option value="reddit">Reddit</option>
+                </select>
+              </div>
+              <div>
+                <label for="manual-od-keyword-mode">Keyword mode</label>
+                <select id="manual-od-keyword-mode">
+                  <option value="any">any (OR)</option>
+                  <option value="all">all (AND)</option>
+                </select>
+              </div>
+              <div>
+                <label for="manual-od-limit">Limit</label>
+                <input type="number" id="manual-od-limit" value="50" min="1" max="1000" />
+              </div>
+              <div>
+                <label for="manual-od-ttl">TTL (minutes)</label>
+                <input type="number" id="manual-od-ttl" value="30" min="1" max="1440" />
+                <small class="od-hint">Min 1 min (local testnet). Use ≥ eval interval for scoring.</small>
+              </div>
+              <div class="od-span-2">
+                <label for="manual-od-keywords">Keywords (comma-separated)</label>
+                <input type="text" id="manual-od-keywords" value="#bittensor" />
+              </div>
+              <div id="manual-od-subreddit-wrap" class="od-hidden">
+                <label for="manual-od-subreddit">Subreddit (Reddit)</label>
+                <input type="text" id="manual-od-subreddit" placeholder="e.g. MachineLearning or r/ai" />
+              </div>
+              <div id="manual-od-usernames-wrap">
+                <label for="manual-od-usernames">Usernames (X, comma-separated)</label>
+                <input type="text" id="manual-od-usernames" placeholder="elonmusk, naval" />
+              </div>
+              <div>
+                <label for="manual-od-start-date">Start date</label>
+                <input type="datetime-local" id="manual-od-start-date" />
+                <small class="od-hint">Empty = 7 days ago (UTC)</small>
+              </div>
+              <div>
+                <label for="manual-od-end-date">End date</label>
+                <input type="datetime-local" id="manual-od-end-date" />
+                <small class="od-hint">Empty = now (UTC)</small>
+              </div>
+            </div>
+            <button type="button" id="create-od-job">Create OD Job</button>
+          </section>
+
+          <section class="od-section">
+            <h3 class="od-section-title">Create from External File</h3>
+            <p class="od-section-desc">
+              Load a JSON array of on-demand job definitions (X or Reddit) and create jobs in batch.
+              Each entry must match the constellation OD job format: platform, keywords/usernames/subreddit,
+              limit, keyword_mode, ttl_minutes, start_date, end_date.
+            </p>
+            <div class="od-form-grid">
+              <div class="od-span-2">
+                <label for="od-label-file">Job file path</label>
+                <input type="text" id="od-label-file" placeholder="/path/to/example_od_jobs.json" />
+              </div>
+              <div>
+                <label for="od-label-platform">Platform filter</label>
+                <select id="od-label-platform">
+                  <option value="all">All platforms</option>
+                  <option value="x">X (Twitter) only</option>
+                  <option value="reddit">Reddit only</option>
+                </select>
+                <small class="od-hint">Filter which entries to preview or batch-create.</small>
+              </div>
+              <div class="od-span-2">
+                <label for="od-label-upload">Upload job file</label>
+                <input type="file" id="od-label-upload" accept=".json" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button type="button" id="preview-od-labels" class="secondary">Preview Jobs</button>
+              <button type="button" id="use-od-example-file" class="secondary">Use example file</button>
+            </div>
+            <pre id="od-label-preview" class="od-label-preview"></pre>
+
+            <h4 class="od-subsection-title">Batch create</h4>
+            <p class="od-section-desc">
+              Job parameters (limit, TTL, dates, keyword_mode) come from the file. Choose how many
+              entries to create starting at the given index.
+            </p>
+            <div class="od-form-grid">
+              <div>
+                <label for="file-od-start-index">Start index</label>
+                <input type="number" id="file-od-start-index" value="0" min="0" />
+              </div>
+              <div>
+                <label for="file-od-create-count">Job count (max 50)</label>
+                <input type="number" id="file-od-create-count" value="1" min="1" max="50" />
+              </div>
+            </div>
+            <button type="button" id="create-od-from-file">Create Jobs from File</button>
+          </section>
+
+          <section class="od-section">
+            <h3 class="od-section-title">Automatic OD Jobs</h3>
+            <p class="od-section-desc">
+              Periodically create on-demand jobs from manual keywords or the external job file above.
+            </p>
+            <div class="checkbox-row">
+              <input type="checkbox" id="auto-od-enabled" />
+              <label for="auto-od-enabled" style="margin:0">Enable automatic OD jobs</label>
+            </div>
+
+            <div class="od-form-grid">
+              <div>
+                <label for="auto-od-interval">Interval (minutes)</label>
+                <input type="number" id="auto-od-interval" min="1" max="1440" value="5" />
+              </div>
+              <div>
+                <label for="auto-od-keyword-source">Keyword source</label>
+                <select id="auto-od-keyword-source">
+                  <option value="manual">Manual keywords</option>
+                  <option value="file">External job file</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="auto-manual-source-panel" class="od-source-panel">
+              <h4 class="od-subsection-title">Manual keyword settings</h4>
+              <div class="od-form-grid">
+                <div>
+                  <label for="auto-od-platform">Platform</label>
+                  <select id="auto-od-platform">
+                    <option value="x">X (Twitter)</option>
+                    <option value="reddit">Reddit</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="auto-od-keyword-mode">Keyword mode</label>
+                  <select id="auto-od-keyword-mode">
+                    <option value="any">any (OR)</option>
+                    <option value="all">all (AND)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="auto-od-limit">Limit per job</label>
+                  <input type="number" id="auto-od-limit" min="1" max="1000" value="50" />
+                </div>
+                <div>
+                  <label for="auto-od-ttl">TTL (minutes)</label>
+                  <input type="number" id="auto-od-ttl" min="1" max="1440" value="30" />
+                </div>
+                <div id="auto-od-subreddit-wrap" class="od-hidden">
+                  <label for="auto-od-subreddit">Subreddit (Reddit)</label>
+                  <input type="text" id="auto-od-subreddit" placeholder="e.g. MachineLearning" />
+                </div>
+                <div id="auto-od-usernames-wrap">
+                  <label for="auto-od-usernames">Usernames (X, comma-separated)</label>
+                  <input type="text" id="auto-od-usernames" placeholder="elonmusk, naval" />
+                </div>
+                <div>
+                  <label for="auto-od-start-date">Start date</label>
+                  <input type="datetime-local" id="auto-od-start-date" />
+                  <small class="od-hint">Empty = 7 days ago</small>
+                </div>
+                <div>
+                  <label for="auto-od-end-date">End date</label>
+                  <input type="datetime-local" id="auto-od-end-date" />
+                  <small class="od-hint">Empty = now</small>
+                </div>
+                <div class="od-span-2">
+                  <label for="auto-od-keywords">Keywords (comma-separated)</label>
+                  <input type="text" id="auto-od-keywords" value="#bittensor" />
+                </div>
+              </div>
+            </div>
+
+            <div id="auto-file-source-panel" class="od-source-panel" style="display:none">
+              <h4 class="od-subsection-title">External job file settings</h4>
+              <p class="od-section-desc">
+                Job file path and platform filter are configured in
+                <strong>Create from External File</strong> above. Preview jobs before enabling the scheduler.
+              </p>
+              <div class="od-form-grid">
+                <div>
+                  <label for="auto-od-label-rotation">Label rotation</label>
+                  <select id="auto-od-label-rotation">
+                    <option value="sequential">Sequential</option>
+                    <option value="random">Random</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="btn-row">
+              <button type="button" id="save-od-settings">Save OD Settings</button>
+            </div>
+            <div id="scheduler-status" class="od-scheduler-status"></div>
+          </section>
+
+          <section class="od-section">
+            <h3 class="od-section-title">Recent Jobs</h3>
+            <p class="od-section-desc">
+              Local job definitions under <code>local_api_data/on_demand/jobs/</code>.
+            </p>
+            <div class="btn-row">
+              <button type="button" id="refresh-od-jobs" class="secondary">Refresh</button>
+              <button type="button" id="clear-od-jobs" class="danger">Clear All Jobs</button>
+            </div>
+            <div class="od-clear-options">
+              <div class="checkbox-row">
+                <input type="checkbox" id="clear-job-submissions" checked />
+                <label for="clear-job-submissions">Also delete miner submissions for removed jobs</label>
+              </div>
+            </div>
+            <div id="od-jobs-list" class="od-jobs-list">
+              <p class="muted-text">No OD jobs yet.</p>
+            </div>
+          </section>
+
+          <section class="od-section">
+            <h3 class="od-section-title">Miner Submissions</h3>
+            <p class="od-section-desc">
+              On-disk miner upload files under
+              <code>local_api_data/on_demand/submissions/</code> and
+              <code>local_api_data/data/</code> (parquet).
+            </p>
+            <div id="od-submissions-dir" class="od-submissions-dir muted-text"></div>
+            <div id="od-submissions-stats" class="od-submissions-stats muted-text"></div>
+            <div class="btn-row">
+              <button type="button" id="refresh-od-submissions" class="secondary">Refresh</button>
+              <button type="button" id="clear-miner-submissions" class="danger">Clear All History</button>
+            </div>
+            <div class="od-clear-options">
+              <div class="checkbox-row">
+                <input type="checkbox" id="clear-od-submissions" checked />
+                <label for="clear-od-submissions">OD submission JSON files</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="clear-parquet-uploads" checked />
+                <label for="clear-parquet-uploads">Parquet uploads (data/)</label>
+              </div>
+            </div>
+            <small class="muted-text od-clear-hint">
+              Deletes miner upload files only. OD job definitions in
+              <code>on_demand/jobs/</code> are kept. This does not reset scores.
+            </small>
+            <div id="od-submissions-list" class="od-submissions-list">
+              <p class="muted-text">No submissions yet.</p>
+            </div>
+            <pre id="od-submission-preview" class="od-submission-preview od-hidden"></pre>
+          </section>
+        </div>
+      </div>
+
+      <div class="panel collapsible-panel" id="feed-panel">
+        <div class="panel-header">
+          Live Evaluation Feed
+          <span style="font-weight:400;color:var(--muted);font-size:0.8rem">SSE stream</span>
+        </div>
+        <div id="feed-collapsible" class="collapsible-body collapsed">
+          <div class="feed-toolbar">
+            <label for="feed-filter">Show</label>
+            <select id="feed-filter">
+              <option value="all">All events</option>
+              <option value="issues">Errors &amp; warnings only</option>
+            </select>
+            <button type="button" id="clear-feed" class="danger">Clear History</button>
+            <span id="feed-count" class="muted-text"></span>
+          </div>
+          <div id="event-feed" class="panel-body" style="padding:0"></div>
+        </div>
+        <button type="button" id="feed-toggle" class="feed-toggle-btn" aria-expanded="false">
+          <span id="feed-toggle-icon">▸</span>
+          <span id="feed-toggle-label">Show Live Evaluation Feed</span>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;padding:0.75rem 1.25rem;border-radius:8px;color:white;font-size:0.875rem;z-index:100"></div>
+
+  <script src="/dashboard/static/app.js?v=29"></script>
+</body>
+</html>

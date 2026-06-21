@@ -1,0 +1,32 @@
+{
+  "accounts": [
+    {
+      "label": "x_account_1",
+      "cookies": [
+        {
+          "domain": ".x.com",
+          "name": "auth_token",
+          "path": "/",
+          "value": "REPLACE_WITH_ACCOUNT_1_AUTH_TOKEN",
+          "secure": true,
+          "httpOnly": true,
+          "sameSite": "no_restriction"
+        }
+      ]
+    },
+    {
+      "label": "x_account_2",
+      "cookies": [
+        {
+          "domain": ".x.com",
+          "name": "auth_token",
+          "path": "/",
+          "value": "REPLACE_WITH_ACCOUNT_2_AUTH_TOKEN",
+          "secure": true,
+          "httpOnly": true,
+          "sameSite": "no_restriction"
+        }
+      ]
+    }
+  ]
+}
