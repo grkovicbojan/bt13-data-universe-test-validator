@@ -8,6 +8,7 @@ from common.protocol import KeywordMode
 from common.date_range import DateRange
 from scraping.scraper import ScrapeConfig, Scraper, ValidationResult
 from scraping.apify import ActorRunner, RunConfig
+from scraping.scrape_cache import get_cached_x_apify_dataset_item, store_x_content
 from scraping.x.model import XContent
 from scraping.x import utils
 import datetime as dt
@@ -15,14 +16,18 @@ import datetime as dt
 
 class ApiDojoTwitterScraper(Scraper):
     """
-    Scrapes tweets using the Apidojo Twitter Scraper: https://console.apify.com/actors/61RPP7dywgiy0JPD0.
+    Scrapes tweets using the Apidojo Twitter Scraper: https://console.apify.com/actors/61RPP7dywgiy0JPD0. nfp1fpt5gUlBwPcor
     """
 
-    ACTOR_ID = "61RPP7dywgiy0JPD0"
+    ACTOR_ID = "nfp1fpt5gUlBwPcor"
 
     SCRAPE_TIMEOUT_SECS = 120
 
-    BASE_RUN_INPUT = {"maxRequestRetries": 5}
+    BASE_RUN_INPUT = {
+        "maxRequestRetries": 5,
+        "includeSearchTerms": False,
+        "sort": "Latest",
+    }
 
     # As of 2/5/24 this actor only takes 256 MB in the default config so we can run a full batch without hitting shared actor memory limits.
     concurrent_validates_semaphore = threading.BoundedSemaphore(20)
@@ -42,6 +47,28 @@ class ApiDojoTwitterScraper(Scraper):
 
         Returns (tweet, is_retweet, author_data, view_count, actor_failed).
         """
+        cached_item = get_cached_x_apify_dataset_item(uri)
+        if cached_item is not None:
+            bt.logging.trace(f"Apidojo validate: cache hit for {uri}")
+            tweets, is_retweets, author_datas, view_counts = (
+                self._best_effort_parse_dataset(
+                    dataset=[cached_item], check_engagement=False
+                )
+            )
+            for index, tweet in enumerate(tweets):
+                if utils.normalize_url(tweet.url) == utils.normalize_url(uri):
+                    self._last_live_fetch = (uri, tweet)
+                    return (
+                        tweet,
+                        is_retweets[index],
+                        author_datas[index],
+                        view_counts[index],
+                        False,
+                    )
+            bt.logging.warning(
+                f"Apidojo validate: cached Apify row did not parse for {uri}"
+            )
+
         actor_failed = False
         for attempt in range(1, max_attempts + 1):
             tweet_count = 1 if attempt == 1 else 5
@@ -73,6 +100,8 @@ class ApiDojoTwitterScraper(Scraper):
             )
             for index, tweet in enumerate(tweets):
                 if utils.normalize_url(tweet.url) == utils.normalize_url(uri):
+                    self._last_live_fetch = (uri, tweet)
+                    store_x_content(uri, tweet)
                     return (
                         tweet,
                         is_retweets[index],

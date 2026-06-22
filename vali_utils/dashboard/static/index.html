@@ -125,6 +125,10 @@
         </div>
 
         <div id="tab-scores" class="tab-content active panel-body">
+          <div class="stats-toolbar" style="margin-bottom:0.75rem">
+            <span id="scores-updated" class="muted-text">Last update: —</span>
+            <button type="button" id="refresh-scores" class="secondary">Refresh</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -220,11 +224,12 @@
               <option value="">All miners</option>
             </select>
             <button type="button" id="refresh-failures" class="secondary">Refresh</button>
+            <button type="button" id="load-more-failures" class="secondary" style="display:none">Load more</button>
             <button type="button" id="clear-validation-failures" class="danger">Clear History</button>
             <span id="failures-count" class="muted-text"></span>
           </div>
           <small class="muted-text failure-clear-hint">
-            Clears in-memory failure reports only. Does not reset scores or validation stats.
+            History is stored in PostgreSQL when DATABASE_URL is set; otherwise in-memory only.
           </small>
           <div id="failures-list" class="failures-list">
             <p class="muted-text">No validation failures recorded yet.</p>
@@ -283,6 +288,18 @@
               </div>
             </div>
             <button type="button" id="create-od-job">Create OD Job</button>
+          </section>
+
+          <section class="od-section">
+            <h3 class="od-section-title">Saved OD Job Templates</h3>
+            <p class="od-section-desc">
+              Jobs you create manually are saved to PostgreSQL when DATABASE_URL is set.
+              Reuse a template to spawn a new active job with the same parameters.
+            </p>
+            <div class="btn-row">
+              <button type="button" id="refresh-od-templates" class="secondary">Refresh templates</button>
+            </div>
+            <div id="od-templates-list" class="od-jobs-list"></div>
           </section>
 
           <section class="od-section">

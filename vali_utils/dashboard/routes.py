@@ -329,15 +329,24 @@ async def get_validation_failures(
     uid: Optional[int] = None,
     validation_type: Optional[str] = None,
     limit: int = 50,
+    offset: int = 0,
 ):
-    """Return recent validation failure reports for the dashboard."""
-    limit = max(1, min(limit, 150))
+    """Return validation failure / comparison reports (PostgreSQL when configured)."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    reports = get_validation_reports()
+    failures = reports.get_recent(
+        limit=limit,
+        offset=offset,
+        uid=uid,
+        validation_type=validation_type,
+    )
+    total = reports.count(uid=uid, validation_type=validation_type)
     return {
-        "failures": get_validation_reports().get_recent(
-            limit=limit,
-            uid=uid,
-            validation_type=validation_type,
-        )
+        "failures": failures,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -562,9 +571,103 @@ async def create_od_job(req: CreateOdJobRequest, request: Request):
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
-            return resp.json()
+            result = resp.json()
     except Exception as e:
-        raise HTTPException(500, f"Failed to create OD job: {e}")
+        raise HTTPException(500, f"Failed to create OD job: {e}") from e
+
+    try:
+        from vali_utils.postgres import get_validator_store
+
+        store = get_validator_store()
+        if store is not None:
+            template_request = {
+                "platform": req.platform,
+                "keywords": req.keywords,
+                "subreddit": req.subreddit,
+                "usernames": req.usernames or [],
+                "limit": req.limit,
+                "ttl_minutes": req.ttl_minutes,
+                "keyword_mode": req.keyword_mode,
+                "start_date": payload.get("start_date"),
+                "end_date": payload.get("end_date"),
+            }
+            template_id = store.save_od_job_template(template_request)
+            result["template_id"] = template_id
+    except Exception as e:
+        bt.logging.warning(f"Failed to save OD job template: {e}")
+
+    return result
+
+
+@router.get("/api/od-jobs/templates")
+async def list_od_job_templates(limit: int = 50):
+    """List saved on-demand job definitions from PostgreSQL."""
+    try:
+        from vali_utils.postgres import get_validator_store
+
+        store = get_validator_store()
+        if store is None:
+            return {"templates": [], "message": "DATABASE_URL not configured"}
+        return {"templates": store.list_od_job_templates(limit=limit)}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list OD job templates: {e}") from e
+
+
+@router.post("/api/od-jobs/templates/{template_id}/create")
+async def create_od_job_from_template(template_id: int):
+    """Create a new active OD job from a saved template."""
+    try:
+        from vali_utils.postgres import get_validator_store
+
+        store = get_validator_store()
+        if store is None:
+            raise HTTPException(503, "DATABASE_URL not configured")
+        template = store.get_od_job_template(template_id)
+        if template is None:
+            raise HTTPException(404, f"Template not found: {template_id}")
+        req = template["request"]
+        payload = build_od_job_payload(
+            req.get("platform", "x"),
+            req.get("keywords") or [],
+            subreddit=req.get("subreddit") or "",
+            usernames=req.get("usernames") or None,
+            limit=int(req.get("limit") or 50),
+            ttl_minutes=int(req.get("ttl_minutes") or 30),
+            keyword_mode=req.get("keyword_mode") or "any",
+            start_date=req.get("start_date"),
+            end_date=req.get("end_date"),
+        )
+        settings = get_settings_manager().get()
+        url = f"{settings.local_api_url.rstrip('/')}/on-demand/constellation/jobs"
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+        store.touch_od_job_template(template_id)
+        result["template_id"] = template_id
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create OD job from template: {e}") from e
+
+
+@router.delete("/api/od-jobs/templates/{template_id}")
+async def delete_od_job_template(template_id: int):
+    """Delete a saved OD job template."""
+    try:
+        from vali_utils.postgres import get_validator_store
+
+        store = get_validator_store()
+        if store is None:
+            raise HTTPException(503, "DATABASE_URL not configured")
+        if not store.delete_od_job_template(template_id):
+            raise HTTPException(404, f"Template not found: {template_id}")
+        return {"status": "ok", "deleted": template_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to delete template: {e}") from e
 
 
 @router.post("/api/od-jobs/create-from-file")

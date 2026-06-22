@@ -18,8 +18,10 @@ from scraping.reddit.utils import (
     validate_nsfw_content,
     validate_score_content,
     validate_comment_count,
-    normalize_label
+    normalize_label,
 )
+from scraping.apify import apify_max_total_charge_usd
+from scraping.scrape_cache import get_cached_reddit_content, store_reddit_content
 
 
 load_dotenv()
@@ -56,10 +58,17 @@ class RedditMCScraper(Scraper):
         if self._last_live_fetch and self._last_live_fetch[0] == url:
             return self._last_live_fetch[1]
 
+        cached = get_cached_reddit_content(url)
+        if cached is not None:
+            bt.logging.trace(f"Reddit MC validate: cache hit for {url}")
+            self._last_live_fetch = (url, cached)
+            return cached
+
         try:
             run = await self.client.actor(self.ACTOR_ID).call(
                 run_input={"url": url},
                 timeout_secs=300,
+                max_total_charge_usd=apify_max_total_charge_usd(),
             )
             dataset_client = self.client.dataset(run["defaultDatasetId"])
             async for item in dataset_client.iterate_items():
@@ -69,6 +78,7 @@ class RedditMCScraper(Scraper):
                     **item, scrapedAt=dt.datetime.now(dt.timezone.utc)
                 )
                 self._last_live_fetch = (url, live)
+                store_reddit_content(url, live)
                 return live
         except Exception as e:
             bt.logging.debug(f"Apify fetch failed for {url}: {e}")
@@ -92,7 +102,8 @@ class RedditMCScraper(Scraper):
         # Run the actor with increased timeout
         run = await self.client.actor(self.ACTOR_ID).call(
             run_input=actor_input,
-            timeout_secs=300  # 5 minutes timeout
+            timeout_secs=300,  # 5 minutes timeout
+            max_total_charge_usd=apify_max_total_charge_usd(),
         )
 
         # Fetch results from the dataset
@@ -347,7 +358,8 @@ async def test_scrape_and_validate():
     try:
         run = await scraper.client.actor(scraper.ACTOR_ID).call(
             run_input=actor_input,
-            timeout_secs=300
+            timeout_secs=300,
+            max_total_charge_usd=apify_max_total_charge_usd(),
         )
 
         # Fetch results

@@ -89,7 +89,7 @@ if [[ ${#PIDS[@]} -eq 0 ]]; then
 
   cd ../bt13-data-universe
   source venv/bin/activate
-  cd ../data-universe
+  cd ../bt13-data-universe-test-validator
 
   # Pass custom RPC as --subtensor.network (not chain_endpoint): bittensor's
   # setup_config overwrites an explicit chain_endpoint when network is also set.
@@ -160,7 +160,7 @@ fi
 
 cd ../bt13-data-universe
 source venv/bin/activate
-cd ../data-universe
+cd ../bt13-data-universe-test-validator
 
 python3 scripts/start_testnet_dashboard.py \
   --wallet.name testWallet \

@@ -9,8 +9,6 @@ let eventSource = null;
 const scoreState = new Map();
 const failureReports = [];
 const MAX_FAILURE_REPORTS = 100;
-let failureRefreshTimer = null;
-let statsRefreshTimer = null;
 function emptyPathStats(path) {
   return {
     path,
@@ -573,14 +571,6 @@ function updateFailuresTabBadge(count) {
   tab.textContent = count > 0 ? `Validation Failures (${count})` : "Validation Failures";
 }
 
-function scheduleFailureRefresh() {
-  if (failureRefreshTimer) clearTimeout(failureRefreshTimer);
-  failureRefreshTimer = setTimeout(() => {
-    loadValidationFailures();
-    failureRefreshTimer = null;
-  }, 400);
-}
-
 function renderFailuresList() {
   const list = document.getElementById("failures-list");
   const countEl = document.getElementById("failures-count");
@@ -740,28 +730,6 @@ function renderMinerStatsDetail(miner) {
   detail.appendChild(grid);
 }
 
-function applyValidationStatsPayload(data) {
-  if (!data) return;
-  if (data.miners) validationStatsState.miners = data.miners;
-  if (data.session) validationStatsState.session = data.session;
-  if (data.miner && data.uid !== undefined) {
-    const idx = validationStatsState.miners.findIndex((m) => m.uid === data.uid);
-    if (idx >= 0) validationStatsState.miners[idx] = data.miner;
-    else validationStatsState.miners.push(data.miner);
-  }
-  if (document.getElementById("tab-stats")?.classList.contains("active")) {
-    renderValidationStats();
-  }
-}
-
-function scheduleStatsRefresh() {
-  if (statsRefreshTimer) clearTimeout(statsRefreshTimer);
-  statsRefreshTimer = setTimeout(() => {
-    loadValidationStats();
-    statsRefreshTimer = null;
-  }, 400);
-}
-
 async function loadValidationStats() {
   try {
     const data = await api("/dashboard/api/validation-stats");
@@ -773,22 +741,41 @@ async function loadValidationStats() {
   }
 }
 
-async function loadValidationFailures() {
+let failureReportsOffset = 0;
+const FAILURE_REPORTS_PAGE = 100;
+
+async function loadValidationFailures(reset = true) {
   try {
+    if (reset) failureReportsOffset = 0;
     const type = document.getElementById("failure-type-filter")?.value || "";
     const uid = document.getElementById("failure-uid-filter")?.value || "";
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({
+      limit: String(FAILURE_REPORTS_PAGE),
+      offset: String(failureReportsOffset),
+    });
     if (type) params.set("validation_type", type);
     if (uid) params.set("uid", uid);
     const data = await api(`/dashboard/api/validation-failures?${params}`);
-    failureReports.length = 0;
+    if (reset) failureReports.length = 0;
     (data.failures || [])
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .forEach((r) => upsertFailureReport(r));
     renderFailuresList();
+    const loadMoreBtn = document.getElementById("load-more-failures");
+    if (loadMoreBtn) {
+      const total = data.total ?? failureReports.length;
+      const loaded = failureReportsOffset + (data.failures || []).length;
+      loadMoreBtn.style.display = loaded < total ? "inline-block" : "none";
+      loadMoreBtn.textContent = `Load more (${loaded}/${total})`;
+    }
   } catch (e) {
     console.error("Validation failures load failed:", e);
   }
+}
+
+async function loadMoreValidationFailures() {
+  failureReportsOffset += FAILURE_REPORTS_PAGE;
+  await loadValidationFailures(false);
 }
 
 async function clearValidationFailures() {
@@ -865,6 +852,10 @@ function updateScoresTable(rows) {
   if (charts.timeline) refreshCharts();
   document.getElementById("last-update").textContent =
     `Last update: ${formatTime(new Date().toISOString())}`;
+  const scoresUpdated = document.getElementById("scores-updated");
+  if (scoresUpdated) {
+    scoresUpdated.textContent = `Last update: ${formatTime(new Date().toISOString())}`;
+  }
   if (document.getElementById("tab-charts")?.classList.contains("active")) {
     requestAnimationFrame(() => resizeCharts());
   }
@@ -990,28 +981,7 @@ function renderFeed() {
 function applyFeedEventSideEffects(event) {
   if (event.event_type === "validation_failure" && event.data) {
     upsertFailureReport(event.data);
-    renderFailuresList();
-  }
-
-  if (
-    event.event_type === "eval_failed" ||
-    (event.event_type === "eval_od_complete" && (event.data?.failures?.length || event.data?.validated_fail)) ||
-    (event.event_type === "eval_s3_complete" && event.data?.is_valid === false) ||
-    (event.event_type === "eval_p2p_complete" && event.data?.passed < event.data?.total)
-  ) {
-    scheduleFailureRefresh();
-  }
-
-  if (event.event_type === "validation_stats_updated" && event.data) {
-    applyValidationStatsPayload(event.data);
-  }
-
-  if (
-    ["eval_od_complete", "eval_p2p_complete", "eval_s3_complete", "eval_failed"].includes(
-      event.event_type
-    )
-  ) {
-    scheduleStatsRefresh();
+    updateFailuresTabBadge(failureReports.length);
   }
 
   if (event.event_type === "scores_reset") {
@@ -1025,15 +995,6 @@ function applyFeedEventSideEffects(event) {
       if (pausedEl) pausedEl.checked = evaluationPaused;
       updateEvalControlsUI();
     }
-  }
-
-  if (event.event_type === "score_updated" || event.event_type === "eval_complete") {
-    applyScoreSnapshot({ uid: event.uid, hotkey: event.hotkey, ...event.data });
-  } else if (
-    ["eval_od_complete", "eval_p2p_complete", "eval_s3_complete"].includes(event.event_type) &&
-    event.data?.score !== undefined
-  ) {
-    applyScoreSnapshot({ uid: event.uid, hotkey: event.hotkey, ...event.data });
   }
 }
 
@@ -1564,14 +1525,29 @@ function isoToDatetimeLocal(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Display stored UTC timestamps as UTC wall-clock in datetime-local fields.
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
 function datetimeLocalToIso(value) {
   if (!value || !String(value).trim()) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  const match = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const [, y, m, d, h, min] = match;
+  const utc = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(h), Number(min)));
+  if (Number.isNaN(utc.getTime())) return null;
+  return utc.toISOString();
+}
+
+function formatOdDateTimeRange(startIso, endIso) {
+  if (!startIso && !endIso) return "";
+  const fmt = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  };
+  return `${fmt(startIso)} → ${fmt(endIso)}`;
 }
 
 function readOdDateFields(startId, endId) {
@@ -1928,9 +1904,104 @@ async function createOdJob() {
     showToast(`OD job created: ${result.id || "ok"}`);
     loadOdJobs();
     loadOdSubmissions();
+    loadOdTemplates();
   } catch (e) {
     showToast("OD job failed: " + e.message, true);
   }
+}
+
+async function loadOdTemplates() {
+  const list = document.getElementById("od-templates-list");
+  if (!list) return;
+
+  try {
+    const data = await api("/dashboard/api/od-jobs/templates");
+    const templates = data.templates || [];
+    if (data.message && !templates.length) {
+      list.innerHTML = `<p class="muted-text">${escapeHtml(data.message)}</p>`;
+      return;
+    }
+    if (!templates.length) {
+      list.innerHTML = "<p class=\"muted-text\">No saved templates yet. Create a manual OD job to save one.</p>";
+      return;
+    }
+
+    list.innerHTML = "";
+    templates.forEach((template) => {
+      const req = template.request || {};
+      const row = document.createElement("div");
+      row.className = "od-job-row";
+      const range = formatOdDateTimeRange(req.start_date, req.end_date);
+      row.innerHTML = `
+        <div class="od-job-info">
+          <div class="od-job-title">${escapeHtml(template.name || `Template #${template.id}`)}</div>
+          <div class="od-job-meta">
+            ${escapeHtml(template.platform || req.platform || "?")}
+            · limit=${req.limit ?? "?"}
+            · ttl=${req.ttl_minutes ?? "?"}m
+            ${range ? ` · ${escapeHtml(range)}` : ""}
+          </div>
+          <div class="od-job-meta muted-text">template #${template.id}</div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="secondary od-template-fill">Fill form</button>
+          <button type="button" class="secondary od-template-create">Create job</button>
+          <button type="button" class="danger od-template-delete">Delete</button>
+        </div>
+      `;
+      row.querySelector(".od-template-fill")?.addEventListener("click", () => {
+        applyOdTemplateToForm(req);
+        showToast("Template loaded into manual form");
+      });
+      row.querySelector(".od-template-create")?.addEventListener("click", async () => {
+        try {
+          const result = await api(
+            `/dashboard/api/od-jobs/templates/${template.id}/create`,
+            { method: "POST", body: JSON.stringify({}) }
+          );
+          showToast(`OD job created from template: ${result.id || "ok"}`);
+          loadOdJobs();
+          loadOdSubmissions();
+        } catch (e) {
+          showToast("Create from template failed: " + e.message, true);
+        }
+      });
+      row.querySelector(".od-template-delete")?.addEventListener("click", async () => {
+        if (!window.confirm(`Delete template #${template.id}?`)) return;
+        try {
+          await api(`/dashboard/api/od-jobs/templates/${template.id}`, { method: "DELETE" });
+          showToast("Template deleted");
+          loadOdTemplates();
+        } catch (e) {
+          showToast("Delete template failed: " + e.message, true);
+        }
+      });
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.innerHTML = `<p class="muted-text">Failed to load templates: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function applyOdTemplateToForm(req) {
+  const platform = req.platform || "x";
+  document.getElementById("manual-od-platform").value = platform;
+  syncOdPlatformFields();
+  document.getElementById("manual-od-keywords").value = (req.keywords || []).join(", ");
+  document.getElementById("manual-od-limit").value = req.limit ?? 50;
+  document.getElementById("manual-od-ttl").value = req.ttl_minutes ?? 30;
+  document.getElementById("manual-od-keyword-mode").value = req.keyword_mode || "any";
+  if (platform === "reddit") {
+    document.getElementById("manual-od-subreddit").value = req.subreddit || "";
+  } else {
+    document.getElementById("manual-od-usernames").value = (req.usernames || []).join(", ");
+  }
+  setOdDateFields(
+    "manual-od-start-date",
+    "manual-od-end-date",
+    req.start_date || "",
+    req.end_date || ""
+  );
 }
 
 async function loadOdJobs() {
@@ -1958,15 +2029,19 @@ async function loadOdJobs() {
       const mode = job.keyword_mode || "any";
       const range =
         job.start_date && job.end_date
-          ? `${job.start_date.slice(0, 10)} → ${job.end_date.slice(0, 10)}`
+          ? formatOdDateTimeRange(job.start_date, job.end_date)
           : "";
+      const createdLabel = job.created_at
+        ? formatOdDateTimeRange(job.created_at, null).split(" → ")[0]
+        : "";
       const jobId = job.id || "";
       row.innerHTML = `
         <div class="od-job-info">
           <div class="od-job-title">${escapeHtml(jobId.slice(0, 8))}… [${escapeHtml(platform)}]</div>
           <div class="od-job-meta">
             mode=${escapeHtml(mode)} · limit=${job.limit ?? "?"}
-            ${range ? ` · ${escapeHtml(range)}` : ""}
+            ${range ? ` · posts ${escapeHtml(range)}` : ""}
+            ${createdLabel ? ` · created ${escapeHtml(createdLabel)}` : ""}
             · expires ${escapeHtml(formatTime(job.expire_at))}
           </div>
           <div class="od-job-meta muted-text">${escapeHtml(jobId)}</div>
@@ -2227,6 +2302,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadScores();
   loadSettings();
   loadOdJobs();
+  loadOdTemplates();
   loadOdSubmissions();
   checkLocalApi();
   loadSchedulerStatus();
@@ -2234,6 +2310,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadValidationStats();
 
   document.getElementById("refresh-stats")?.addEventListener("click", loadValidationStats);
+  document.getElementById("refresh-scores")?.addEventListener("click", loadScores);
   document.getElementById("chart-uid")?.addEventListener("change", () => {
     refreshCharts();
     requestAnimationFrame(() => resizeCharts());
@@ -2266,28 +2343,15 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("eval-once-btn")?.addEventListener("click", triggerEval);
   document.getElementById("reset-scores")?.addEventListener("click", resetAllScores);
   document.getElementById("create-od-job").addEventListener("click", createOdJob);
+  document.getElementById("refresh-od-templates")?.addEventListener("click", loadOdTemplates);
   document.getElementById("refresh-od-jobs")?.addEventListener("click", loadOdJobs);
   document.getElementById("clear-od-jobs")?.addEventListener("click", clearOdJobs);
   document.getElementById("refresh-od-submissions")?.addEventListener("click", loadOdSubmissions);
   document.getElementById("clear-miner-submissions")?.addEventListener("click", clearMinerSubmissions);
-  document.getElementById("refresh-failures")?.addEventListener("click", loadValidationFailures);
+  document.getElementById("refresh-failures")?.addEventListener("click", () => loadValidationFailures(true));
+  document.getElementById("load-more-failures")?.addEventListener("click", loadMoreValidationFailures);
   document.getElementById("clear-validation-failures")?.addEventListener("click", clearValidationFailures);
   document.getElementById("clear-feed")?.addEventListener("click", clearFeedHistory);
-  document.getElementById("failure-type-filter")?.addEventListener("change", loadValidationFailures);
-  document.getElementById("failure-uid-filter")?.addEventListener("change", renderFailuresList);
-
-  setInterval(loadStatus, 30000);
-  setInterval(loadScores, 5000);
-  setInterval(loadOdJobs, 30000);
-  setInterval(loadOdSubmissions, 30000);
-  setInterval(checkLocalApi, 30000);
-  setInterval(loadSchedulerStatus, 10000);
-  setInterval(() => {
-    if (document.getElementById("tab-failures")?.classList.contains("active")) {
-      loadValidationFailures();
-    }
-    if (document.getElementById("tab-stats")?.classList.contains("active")) {
-      loadValidationStats();
-    }
-  }, 5000);
+  document.getElementById("failure-type-filter")?.addEventListener("change", () => loadValidationFailures(true));
+  document.getElementById("failure-uid-filter")?.addEventListener("change", () => loadValidationFailures(true));
 });

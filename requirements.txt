@@ -30,3 +30,4 @@ substrate-interface==1.7.11
 snscrape
 playwright
 aiohttp-socks>=0.8.4
+psycopg2-binary>=2.9.9

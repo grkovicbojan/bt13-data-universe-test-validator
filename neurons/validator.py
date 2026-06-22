@@ -448,6 +448,19 @@ class Validator:
         )
         get_settings_manager(settings_path)
 
+        try:
+            from vali_utils.postgres import init_validator_store
+
+            if init_validator_store() is not None:
+                bt.logging.success("Validator PostgreSQL store initialized")
+            else:
+                bt.logging.info(
+                    "DATABASE_URL not set — scrape cache, OD templates, and "
+                    "validation history will use in-memory storage only"
+                )
+        except Exception as e:
+            bt.logging.warning(f"PostgreSQL init failed: {e}")
+
     def _start_local_api(self):
         """Start the local Data Universe API that replaces remote S3 access."""
         import os

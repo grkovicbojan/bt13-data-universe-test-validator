@@ -1,7 +1,7 @@
 """Shared helpers for building on-demand job payloads."""
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from vali_utils.dashboard.label_loader import MAX_KEYWORDS_PER_OD_JOB, OdJobFileEntry
 
@@ -9,19 +9,59 @@ VALID_KEYWORD_MODES = {"any", "all"}
 DEFAULT_OD_LOOKBACK_DAYS = 7
 
 
+def normalize_od_datetime(value: Optional[str]) -> Optional[str]:
+    """Parse an ISO/local datetime string and return UTC ISO with Z suffix."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat().replace("+00:00", "Z")
+
+
+def _to_utc_dt(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
 def resolve_od_date_range(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     *,
     lookback_days: int = DEFAULT_OD_LOOKBACK_DAYS,
-) -> tuple[str, str]:
-    """Return ISO start/end dates, using defaults when fields are empty."""
+) -> Tuple[str, str]:
+    """Return UTC ISO start/end dates for OD jobs.
+
+    Empty fields use defaults only when both are absent. When one side is set,
+    the other is derived relative to that value (not an unrelated clock).
+    """
     now = datetime.now(timezone.utc)
-    resolved_end = end_date.strip() if end_date and end_date.strip() else now.isoformat()
-    if start_date and start_date.strip():
-        resolved_start = start_date.strip()
-    else:
-        resolved_start = (now - timedelta(days=lookback_days)).isoformat()
+    norm_start = normalize_od_datetime(start_date)
+    norm_end = normalize_od_datetime(end_date)
+
+    if norm_start and norm_end:
+        return norm_start, norm_end
+    if norm_start and not norm_end:
+        return norm_start, now.isoformat().replace("+00:00", "Z")
+    if norm_end and not norm_start:
+        end_dt = _to_utc_dt(norm_end)
+        start_dt = end_dt - timedelta(days=lookback_days)
+        return (
+            start_dt.isoformat().replace("+00:00", "Z"),
+            norm_end,
+        )
+
+    resolved_end = now.isoformat().replace("+00:00", "Z")
+    resolved_start = (now - timedelta(days=lookback_days)).isoformat().replace(
+        "+00:00", "Z"
+    )
     return resolved_start, resolved_end
 
 

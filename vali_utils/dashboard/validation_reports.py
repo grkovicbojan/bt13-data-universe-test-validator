@@ -112,12 +112,23 @@ class ValidationReportStore:
     def record(self, report: ValidationFailureReport) -> ValidationFailureReport:
         with self._lock:
             self._reports.appendleft(report)
+        report_dict = report.to_dict()
+        try:
+            from vali_utils.postgres import get_validator_store
+
+            store = get_validator_store()
+            if store is not None:
+                store.insert_validation_comparison(report_dict)
+        except Exception as e:
+            import bittensor as bt
+
+            bt.logging.warning(f"Failed to persist validation comparison: {e}")
         try:
             get_event_bus().publish(
                 "validation_failure",
                 report.uid,
                 report.hotkey,
-                report.to_dict(),
+                report_dict,
             )
         except Exception as e:
             import bittensor as bt
@@ -130,9 +141,27 @@ class ValidationReportStore:
     def get_recent(
         self,
         limit: int = 50,
+        offset: int = 0,
         uid: Optional[int] = None,
         validation_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        try:
+            from vali_utils.postgres import get_validator_store
+
+            store = get_validator_store()
+            if store is not None:
+                result = store.list_validation_comparisons(
+                    limit=limit,
+                    offset=offset,
+                    uid=uid,
+                    validation_type=validation_type,
+                )
+                return result["failures"]
+        except Exception as e:
+            import bittensor as bt
+
+            bt.logging.warning(f"Postgres validation history read failed: {e}")
+
         with self._lock:
             items = list(self._reports)
         if uid is not None:
@@ -140,14 +169,53 @@ class ValidationReportStore:
         if validation_type:
             items = [r for r in items if r.validation_type == validation_type]
         items.sort(key=lambda r: r.timestamp, reverse=True)
-        return [r.to_dict() for r in items[:limit]]
+        return [r.to_dict() for r in items[offset : offset + limit]]
+
+    def count(
+        self,
+        uid: Optional[int] = None,
+        validation_type: Optional[str] = None,
+    ) -> int:
+        try:
+            from vali_utils.postgres import get_validator_store
+
+            store = get_validator_store()
+            if store is not None:
+                return int(
+                    store.list_validation_comparisons(
+                        limit=1,
+                        offset=0,
+                        uid=uid,
+                        validation_type=validation_type,
+                    )["total"]
+                )
+        except Exception:
+            pass
+        with self._lock:
+            items = list(self._reports)
+        if uid is not None:
+            items = [r for r in items if r.uid == uid]
+        if validation_type:
+            items = [r for r in items if r.validation_type == validation_type]
+        return len(items)
 
     def clear(self) -> int:
         """Remove all stored validation failure reports. Returns count removed."""
+        pg_removed = 0
+        try:
+            from vali_utils.postgres import get_validator_store
+
+            store = get_validator_store()
+            if store is not None:
+                pg_removed = store.clear_validation_comparisons()
+        except Exception as e:
+            import bittensor as bt
+
+            bt.logging.warning(f"Postgres validation history clear failed: {e}")
         with self._lock:
             count = len(self._reports)
             self._reports.clear()
-            return count
+            return max(count, pg_removed)
 
 
 _store: Optional[ValidationReportStore] = None
@@ -430,6 +498,7 @@ def record_p2p_failure(
     entities: Optional[List[DataEntity]] = None,
     validation_results: Optional[List[Any]] = None,
     failure_entries: Optional[List[Dict[str, Any]]] = None,
+    hints: Optional[List[str]] = None,
 ) -> None:
     """Persist a P2P validation failure report."""
     failures: List[Dict[str, Any]] = []
@@ -457,6 +526,14 @@ def record_p2p_failure(
         failures=failures,
     )
 
+    merged_hints = list(hints or []) + _p2p_hints(failure_phase, reason)
+    seen_hints: set[str] = set()
+    report_hints: List[str] = []
+    for hint in merged_hints:
+        if hint and hint not in seen_hints:
+            seen_hints.add(hint)
+            report_hints.append(hint)
+
     get_validation_reports().record(
         ValidationFailureReport(
             id=str(uuid.uuid4()),
@@ -472,7 +549,7 @@ def record_p2p_failure(
                 "entities": preview_entities(entities or []),
             },
             failures=failures,
-            hints=_p2p_hints(failure_phase, reason),
+            hints=report_hints,
             validation_trail=validation_trail,
         )
     )

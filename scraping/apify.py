@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from typing import List, Optional
 from apify_client import ApifyClientAsync
 from pydantic import BaseModel, Field, PositiveInt
@@ -9,6 +10,22 @@ from dotenv import load_dotenv
 from common.data import StrictBaseModel
 
 load_dotenv()
+
+# Pay-per-event Store actors reject runs when maxTotalChargeUsd is below ~$0.02.
+_DEFAULT_MAX_TOTAL_CHARGE_USD = 1.0
+
+
+def default_max_total_charge_usd() -> float:
+    """Per-run spend cap for pay-per-event Apify actors (API default is too low)."""
+    raw = os.getenv("APIFY_MAX_TOTAL_CHARGE_USD", str(_DEFAULT_MAX_TOTAL_CHARGE_USD))
+    try:
+        return max(0.02, float(raw))
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_TOTAL_CHARGE_USD
+
+
+def apify_max_total_charge_usd() -> Decimal:
+    return Decimal(str(default_max_total_charge_usd()))
 
 
 class RunConfig(StrictBaseModel):
@@ -41,6 +58,15 @@ class RunConfig(StrictBaseModel):
 
     memory_mb: Optional[int] = Field(
         description="The amount of memory in mb to use for this run.", default=None
+    )
+
+    max_total_charge_usd: float = Field(
+        description=(
+            "Maximum cost for pay-per-event Actor runs (maxTotalChargeUsd). "
+            "Required for Store actors with per-event minimum charges."
+        ),
+        default_factory=default_max_total_charge_usd,
+        ge=0.02,
     )
 
 
@@ -76,6 +102,7 @@ class ActorRunner:
         run = await client.actor(config.actor_id).call(
             run_input=run_input,
             max_items=config.max_data_entities,
+            max_total_charge_usd=Decimal(str(config.max_total_charge_usd)),
             timeout_secs=config.timeout_secs,
             # If not set, the client will wait indefinitely for the run to finish. Ensure we don't wait forever.
             wait_secs=config.timeout_secs + 5,

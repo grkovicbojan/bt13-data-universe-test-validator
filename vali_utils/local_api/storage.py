@@ -155,6 +155,12 @@ class LocalApiStorage:
                 "keyword_mode": job_payload.get("keyword_mode", "any"),
                 "status": "active",
             }
+            for key in ("start_date", "end_date"):
+                value = record.get(key)
+                if value:
+                    from vali_utils.dashboard.od_job_utils import normalize_od_datetime
+
+                    record[key] = normalize_od_datetime(str(value))
             with open(self._job_path(job_id), "w") as f:
                 json.dump(record, f, indent=2, default=str)
             bt.logging.info(f"Local API: created OD job {job_id}")
