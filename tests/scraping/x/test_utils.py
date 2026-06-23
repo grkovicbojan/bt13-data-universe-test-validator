@@ -372,6 +372,30 @@ class TestValidateScrapedAt(unittest.TestCase):
         result = utils.validate_scraped_at(parsed, entity)
         self.assertIsNone(result)
 
+    def test_validate_data_entity_fields_reports_label_mismatch(self):
+        ts = dt.datetime(2026, 6, 18, 0, 20, 53, tzinfo=dt.timezone.utc)
+        url = "https://x.com/subnetradarcom/status/2067402130730705293"
+        actual = XContent(
+            username="subnetradarcom",
+            text="Subnet-owner coldkey swap#bittensor $TAO #dTAO",
+            url=url,
+            timestamp=ts,
+            tweet_hashtags=["#bittensor", "#TAO", "#dTAO"],
+        )
+        miner_content = XContent(
+            username="subnetradarcom",
+            text="Subnet-owner coldkey swap#bittensor $TAO #dTAO",
+            url=url,
+            timestamp=ts,
+            tweet_hashtags=["#dTAO"],
+        )
+        miner_entity = XContent.to_data_entity(miner_content)
+        result = utils.validate_data_entity_fields(actual, miner_entity)
+        self.assertFalse(result.is_valid)
+        self.assertIn("label:", result.reason)
+        self.assertIn("#dtao", result.reason.lower())
+        self.assertIn("#bittensor", result.reason.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

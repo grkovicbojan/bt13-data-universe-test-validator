@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 import bittensor as bt
 
+from scraping.reddit.apify_dataset import reddit_content_from_cache_payload
 from scraping.reddit.model import RedditContent
 from scraping.x.apify_dataset import coerce_scrape_cache_payload_to_apify_item
 from scraping.x.model import XContent
@@ -30,7 +31,7 @@ def get_cached_reddit_content(url: str) -> Optional[RedditContent]:
         payload = store.get_scrape_cache(url, "reddit")
         if not payload:
             return None
-        return RedditContent.parse_obj(payload)
+        return reddit_content_from_cache_payload(payload)
     except Exception as e:
         bt.logging.debug(f"Reddit scrape cache read failed for {url}: {e}")
         return None

@@ -2,7 +2,7 @@
 """Import Apify actor dataset items into PostgreSQL scrape_cache.
 
 The test validator checks scrape_cache by URL before calling Apify
-(apidojo_scraper / reddit_mc_scraper). X rows are stored as full Apify
+(apidojo_scraper / reddit_mc_scraper). Rows are stored as full Apify
 dataset items (same JSON as iterate_items / all fields). Run this to
 backfill from your Apify account so validation reuses cached rows.
 
@@ -37,6 +37,7 @@ load_dotenv(ROOT / ".env")
 from apify_client import ApifyClient
 
 # Postgres only — avoids pulling bittensor via scraping.* imports.
+from scraping.reddit.apify_dataset import is_raw_apify_reddit_dataset_item
 from scraping.x.apify_dataset import is_raw_apify_x_dataset_item
 from vali_utils.postgres.store import ValidatorPostgresStore
 
@@ -73,22 +74,8 @@ def _x_url_from_apify_item(item: dict) -> str:
     return _normalize_x_url(str(item.get("url") or ""))
 
 
-def _normalize_reddit_item(item: dict) -> dict:
-    out = dict(item)
-    if "isNsfw" in out:
-        out["is_nsfw"] = out.pop("isNsfw")
-    return out
-
-
-def _parse_reddit_item(item: dict) -> Optional[Dict[str, Any]]:
-    normalized = _normalize_reddit_item(item)
-    if not normalized.get("url") or not normalized.get("id"):
-        return None
-    normalized["scrapedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
-    for key in ("createdAt", "scrapedAt"):
-        if isinstance(normalized.get(key), dt.datetime):
-            normalized[key] = normalized[key].isoformat()
-    return normalized
+def _reddit_url_from_apify_item(item: dict) -> str:
+    return str(item.get("url") or "").strip()
 
 
 def _put_cache(
@@ -202,11 +189,11 @@ def sync_actor_runs(
                 url = _x_url_from_apify_item(item)
                 payload = item
             else:
-                payload = _parse_reddit_item(item)
-                if payload is None:
+                if not is_raw_apify_reddit_dataset_item(item):
                     stats["unparsed"] += 1
                     continue
-                url = str(payload.get("url", "")).strip()
+                url = _reddit_url_from_apify_item(item)
+                payload = item
 
             if url in seen_urls and not force:
                 stats["skipped"] += 1
@@ -249,9 +236,11 @@ def prefetch_url(
             max_total_charge_usd=charge,
         )
         for item in _iter_dataset_items(client, run.get("defaultDatasetId", "")):
-            payload = _parse_reddit_item(item)
-            if payload and payload.get("url"):
-                _put_cache(store, payload["url"], platform, payload)
+            if not is_raw_apify_reddit_dataset_item(item):
+                continue
+            item_url = _reddit_url_from_apify_item(item)
+            if item_url:
+                _put_cache(store, item_url, platform, item)
                 return platform, "stored"
         return platform, "unparsed"
 

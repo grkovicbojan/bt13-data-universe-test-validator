@@ -362,6 +362,38 @@ def validate_media_content(
     return None
 
 
+def _format_data_label(label) -> str:
+    if label is None:
+        return "None"
+    return str(getattr(label, "value", label))
+
+
+def _data_entity_non_content_mismatches(
+    expected_entity: DataEntity, miner_entity: DataEntity
+) -> List[str]:
+    """List non-content DataEntity field diffs (expected=validator, miner=submission)."""
+    mismatches: List[str] = []
+    if expected_entity.uri != miner_entity.uri:
+        mismatches.append(
+            f"uri: miner={miner_entity.uri!r} != validator={expected_entity.uri!r}"
+        )
+    if expected_entity.datetime != miner_entity.datetime:
+        mismatches.append(
+            f"datetime: miner={expected_entity.datetime!s} != validator={expected_entity.datetime!s}"
+        )
+    if expected_entity.source != miner_entity.source:
+        mismatches.append(
+            f"source: miner={expected_entity.source!r} != validator={expected_entity.source!r}"
+        )
+    if expected_entity.label != miner_entity.label:
+        mismatches.append(
+            "label: miner="
+            f"{_format_data_label(miner_entity.label)!r} != validator="
+            f"{_format_data_label(expected_entity.label)!r}"
+        )
+    return mismatches
+
+
 def validate_data_entity_fields(
     actual_tweet: XContent, entity: DataEntity
 ) -> ValidationResult:
@@ -402,9 +434,15 @@ def validate_data_entity_fields(
     if not DataEntity.are_non_content_fields_equal(
         normalized_tweet_entity, normalized_entity
     ):
+        mismatches = _data_entity_non_content_mismatches(
+            normalized_tweet_entity, normalized_entity
+        )
+        reason = "The DataEntity fields are incorrect based on the tweet."
+        if mismatches:
+            reason += " " + "; ".join(mismatches)
         return ValidationResult(
             is_valid=False,
-            reason="The DataEntity fields are incorrect based on the tweet.",
+            reason=reason,
             content_size_bytes_validated=entity.content_size_bytes,
         )
 

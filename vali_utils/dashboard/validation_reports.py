@@ -259,6 +259,10 @@ _REASON_FOCUS_FIELD = [
     ("data types do not match", "dataType"),
     ("parent ids do not match", "parentId"),
     ("claimed bytes are too big", "_content_size"),
+    ("label:", "label"),
+    ("datetime:", "datetime"),
+    ("uri:", "uri"),
+    ("source:", "source"),
     ("text", "text"),
     ("tweet", "text"),
 ]
