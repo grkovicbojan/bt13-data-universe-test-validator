@@ -36,6 +36,7 @@ function emptyValidationStatsSession() {
 }
 
 const validationStatsState = { miners: [], session: emptyValidationStatsSession() };
+let latestDashboardSettings = null;
 const scoreHistory = new Map();
 const prevValues = new Map();
 let disableSetWeights = false;
@@ -1247,13 +1248,52 @@ async function loadMiners() {
     data.miners.forEach((m) => {
       const opt = document.createElement("option");
       opt.value = m.uid;
-      opt.textContent = `UID ${m.uid} — ${m.hotkey.slice(0, 12)}…`;
+      opt.textContent = `UID ${m.uid} — ${m.hotkey.slice(0, 12)}… (${m.ip}:${m.port})`;
       if (current.includes(m.uid)) opt.selected = true;
       select.appendChild(opt);
     });
+    if (latestDashboardSettings) {
+      applyTargetMinerSettings(latestDashboardSettings);
+    }
   } catch (e) {
     console.error("Miners load failed:", e);
   }
+}
+
+function applyTargetMinerSettings(settings) {
+  const select = document.getElementById("target-miner");
+  if (!select || !settings) return;
+
+  const targets = new Set(settings.target_miner_uids || []);
+  if (targets.size > 0) {
+    [...select.options].forEach((opt) => {
+      opt.selected = targets.has(parseInt(opt.value, 10));
+    });
+  }
+
+  const overrideEl = document.getElementById("axon-override");
+  if (!overrideEl) return;
+
+  const overrides = settings.miner_axon_overrides || {};
+  if (targets.size > 0) {
+    const firstUid = String([...targets][0]);
+    overrideEl.value = overrides[firstUid] || "";
+    return;
+  }
+  const values = Object.values(overrides);
+  overrideEl.value = values[0] || "";
+}
+
+function buildAxonOverrides(targetUids) {
+  const hostPort = document.getElementById("axon-override")?.value.trim();
+  if (!hostPort || !targetUids.length) {
+    return {};
+  }
+  const overrides = {};
+  targetUids.forEach((uid) => {
+    overrides[String(uid)] = hostPort;
+  });
+  return overrides;
 }
 
 async function loadScores() {
@@ -1626,6 +1666,8 @@ async function loadSettings() {
   try {
     const data = await api("/dashboard/api/settings");
     const s = data.settings;
+    latestDashboardSettings = s;
+    applyTargetMinerSettings(s);
     document.getElementById("skip-s3").checked = s.skip_s3_validation;
     document.getElementById("skip-p2p").checked = !!s.skip_p2p_validation;
     document.getElementById("p2p-validation-mode").value =
@@ -1791,6 +1833,7 @@ async function saveSettings() {
 
   const payload = {
     target_miner_uids: targetUids,
+    miner_axon_overrides: buildAxonOverrides(targetUids),
     skip_s3_validation: document.getElementById("skip-s3").checked,
     skip_p2p_validation: document.getElementById("skip-p2p").checked,
     p2p_scraper_validation_mode: document.getElementById("p2p-validation-mode").value,
@@ -1812,9 +1855,17 @@ async function saveSettings() {
 
   try {
     await api("/dashboard/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+    latestDashboardSettings = { ...(latestDashboardSettings || {}), ...payload };
     evaluationPaused = payload.evaluation_paused;
     updateEvalControlsUI();
-    showToast("Settings saved");
+    const axonNote = payload.miner_axon_overrides && Object.keys(payload.miner_axon_overrides).length
+      ? ` — axon override for UID ${Object.keys(payload.miner_axon_overrides).join(", ")}`
+      : "";
+    showToast(
+      targetUids.length
+        ? `Settings saved for UID(s): ${targetUids.join(", ")}${axonNote}`
+        : `Settings saved (no target miners — Run Once uses random batch)${axonNote}`
+    );
     loadStatus();
     loadScores();
   } catch (e) {
@@ -1823,9 +1874,22 @@ async function saveSettings() {
 }
 
 async function triggerEval() {
+  const select = document.getElementById("target-miner");
+  const targetUids = [...select.selectedOptions].map((o) => parseInt(o.value, 10));
   try {
     await api("/dashboard/api/evaluate/trigger", { method: "POST" });
-    showToast("Evaluation triggered");
+    if (targetUids.length) {
+      showToast(`Evaluation triggered for UID(s): ${targetUids.join(", ")}`);
+    } else {
+      showToast(
+        "Evaluation triggered for next miner batch — select Target Miner(s) and Save first to eval a specific UID"
+      );
+    }
+    setTimeout(() => {
+      loadValidationStats();
+      loadValidationFailures();
+      loadStatus();
+    }, 2500);
   } catch (e) {
     showToast("Trigger failed: " + e.message, true);
   }

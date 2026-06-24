@@ -22,6 +22,17 @@
         <label for="target-miner">Target Miner(s)</label>
         <select id="target-miner" multiple size="5"></select>
         <small style="color:var(--muted)">Hold Ctrl/Cmd to select multiple. Empty = all miners.</small>
+        <small style="color:var(--muted);display:block;margin-top:0.25rem">
+          <strong>Run Once / Evaluate Now only affect selected targets.</strong>
+          With none selected, a random batch of miners is evaluated.
+        </small>
+
+        <label for="axon-override" style="margin-top:0.75rem">Axon override (host:port)</label>
+        <input type="text" id="axon-override" placeholder="127.0.0.1:8093" />
+        <small style="color:var(--muted)">
+          Local testnet: route P2P to your miner instead of the on-chain IP.
+          Applied to selected target miner(s) when you save.
+        </small>
 
         <div class="checkbox-row">
           <input type="checkbox" id="skip-s3" />
@@ -531,6 +542,6 @@
 
   <div id="toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;padding:0.75rem 1.25rem;border-radius:8px;color:white;font-size:0.875rem;z-index:100"></div>
 
-  <script src="/dashboard/static/app.js?v=29"></script>
+  <script src="/dashboard/static/app.js?v=30"></script>
 </body>
 </html>

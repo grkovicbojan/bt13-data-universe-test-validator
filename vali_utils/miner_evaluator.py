@@ -930,17 +930,9 @@ class MinerEvaluator:
             emit_miner_score_update(
                 uid, hotkey, self.scorer, self.metagraph, phase="p2p_fail"
             )
-            if s3_validation_result:
-                self._apply_s3_validation_result(uid, hotkey, s3_validation_result)
-            snapshot = emit_miner_score_update(
-                uid, hotkey, self.scorer, self.metagraph, phase="complete"
+            self._apply_s3_and_complete_eval(
+                uid, hotkey, s3_validation_result, t_start, status="no scorable buckets"
             )
-            get_event_bus().publish("eval_complete", uid, hotkey, snapshot)
-            metrics.MINER_EVALUATOR_EVAL_MINER_DURATION.labels(
-                hotkey=self.wallet.hotkey.ss58_address,
-                miner_hotkey=hotkey,
-                status="no scorable buckets",
-            ).observe(time.perf_counter() - t_start)
             return
 
         bt.logging.info(
@@ -1004,8 +996,9 @@ class MinerEvaluator:
                 ]
             )
             emit_miner_score_update(uid, hotkey, self.scorer, self.metagraph, phase="p2p_fail")
-
-            metrics.MINER_EVALUATOR_EVAL_MINER_DURATION.labels(hotkey=self.wallet.hotkey.ss58_address, miner_hotkey=hotkey, status='invalid response').observe(time.perf_counter() - t_start)
+            self._apply_s3_and_complete_eval(
+                uid, hotkey, s3_validation_result, t_start, status="invalid response"
+            )
             return
 
         # Perform basic validation on the entities.
@@ -1062,8 +1055,9 @@ class MinerEvaluator:
                 ]
             )
             emit_miner_score_update(uid, hotkey, self.scorer, self.metagraph, phase="p2p_fail")
-
-            metrics.MINER_EVALUATOR_EVAL_MINER_DURATION.labels(hotkey=self.wallet.hotkey.ss58_address, miner_hotkey=hotkey, status='invalid data entity bucket').observe(time.perf_counter() - t_start)
+            self._apply_s3_and_complete_eval(
+                uid, hotkey, s3_validation_result, t_start, status="invalid data entity bucket"
+            )
             return
 
         # Perform uniqueness validation on the entity contents.
@@ -1112,8 +1106,9 @@ class MinerEvaluator:
                 ]
             )
             emit_miner_score_update(uid, hotkey, self.scorer, self.metagraph, phase="p2p_fail")
-
-            metrics.MINER_EVALUATOR_EVAL_MINER_DURATION.labels(hotkey=self.wallet.hotkey.ss58_address, miner_hotkey=hotkey, status='duplicate entities').observe(time.perf_counter() - t_start)
+            self._apply_s3_and_complete_eval(
+                uid, hotkey, s3_validation_result, t_start, status="duplicate entities"
+            )
             return
 
         # Basic validation and uniqueness passed. Now sample some entities for data correctness.
@@ -1236,6 +1231,28 @@ class MinerEvaluator:
             hotkey,
             snapshot,
         )
+
+    def _apply_s3_and_complete_eval(
+        self,
+        uid: int,
+        hotkey: str,
+        s3_validation_result: Optional[S3ValidationResult],
+        t_start: float,
+        *,
+        status: str,
+    ) -> None:
+        """Publish S3 dashboard stats/events even when P2P exits early."""
+        if s3_validation_result:
+            self._apply_s3_validation_result(uid, hotkey, s3_validation_result)
+        snapshot = emit_miner_score_update(
+            uid, hotkey, self.scorer, self.metagraph, phase="complete"
+        )
+        get_event_bus().publish("eval_complete", uid, hotkey, snapshot)
+        metrics.MINER_EVALUATOR_EVAL_MINER_DURATION.labels(
+            hotkey=self.wallet.hotkey.ss58_address,
+            miner_hotkey=hotkey,
+            status=status,
+        ).observe(time.perf_counter() - t_start)
 
     async def _maybe_run_s3_validation(
         self, uid: int, hotkey: str, dashboard_settings

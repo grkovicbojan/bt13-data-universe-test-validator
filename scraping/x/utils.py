@@ -379,11 +379,11 @@ def _data_entity_non_content_mismatches(
         )
     if expected_entity.datetime != miner_entity.datetime:
         mismatches.append(
-            f"datetime: miner={expected_entity.datetime!s} != validator={expected_entity.datetime!s}"
+            f"datetime: miner={miner_entity.datetime!s} != validator={expected_entity.datetime!s}"
         )
     if expected_entity.source != miner_entity.source:
         mismatches.append(
-            f"source: miner={expected_entity.source!r} != validator={expected_entity.source!r}"
+            f"source: miner={miner_entity.source!r} != validator={expected_entity.source!r}"
         )
     if expected_entity.label != miner_entity.label:
         mismatches.append(
