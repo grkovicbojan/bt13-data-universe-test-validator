@@ -657,6 +657,36 @@ input[type="datetime-local"] {
   cursor: not-allowed;
 }
 
+.s3-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.s3-metric-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+}
+
+.s3-metric-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.s3-metric-value {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.failure-s3-metrics {
+  margin-bottom: 0.75rem;
+}
+
 #failure-page-info {
   font-size: 0.82rem;
   min-width: 12rem;

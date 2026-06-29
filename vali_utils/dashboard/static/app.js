@@ -85,6 +85,102 @@ function formatPct(v) {
   return (v * 100).toFixed(2) + "%";
 }
 
+function formatSizeMB(mb) {
+  const n = Number(mb);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 1024) return `${(n / 1024).toFixed(2)} GB`;
+  if (n >= 1) return `${n.toFixed(1)} MB`;
+  if (n >= 0.001) return `${(n * 1024).toFixed(0)} KB`;
+  return `${(n * 1024 * 1024).toFixed(0)} B`;
+}
+
+function formatPctValue(v, digits = 1) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
+}
+
+function renderS3MetricsGrid(detail, options = {}) {
+  const d = detail || {};
+  const active = d.active_jobs ?? d.total_active_jobs;
+  const expected = d.expected_jobs ?? d.expected_jobs_count;
+  const coverage = d.job_coverage_rate;
+  const coverageLabel =
+    active != null && expected != null
+      ? `${active}/${expected} (${formatPctValue(coverage)})`
+      : formatPctValue(coverage);
+
+  const items = [
+    { label: "Parquet size", value: formatSizeMB(d.total_size_mb) },
+    { label: "Effective size", value: formatSizeMB(d.effective_size_mb) },
+    {
+      label: "Rows / file",
+      value:
+        d.avg_rows_per_file != null ? Number(d.avg_rows_per_file).toFixed(1) : "—",
+    },
+    { label: "Job coverage", value: coverageLabel },
+  ];
+  if (options.showFiles) {
+    const sampled = d.files_checked;
+    const total = d.files_total ?? d.total_files_count;
+    items.push({
+      label: "Files",
+      value:
+        total != null && sampled != null
+          ? `${sampled}/${total} sampled`
+          : String(total ?? sampled ?? "—"),
+    });
+  }
+  if (options.showRows) {
+    items.push({
+      label: "Total rows",
+      value: d.total_rows != null ? Number(d.total_rows).toLocaleString() : "—",
+    });
+  }
+
+  return `
+    <div class="s3-metrics-grid">
+      ${items
+        .map(
+          (item) => `
+        <div class="s3-metric-item">
+          <div class="s3-metric-label">${escapeHtml(item.label)}</div>
+          <div class="s3-metric-value">${escapeHtml(String(item.value))}</div>
+        </div>`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderS3FailureMetrics(report) {
+  if (report.validation_type !== "s3") return "";
+  const job = report.job || {};
+  const sub = report.submission || {};
+  const totalFiles = job.total_files_count || 0;
+  const totalRows = job.total_rows || 0;
+  const avgRows =
+    job.avg_rows_per_file ??
+    (totalFiles > 0 ? (totalRows / totalFiles).toFixed(1) : "—");
+  const detail = {
+    total_size_mb: sub.total_size_mb,
+    effective_size_mb: sub.effective_size_mb,
+    avg_rows_per_file: avgRows,
+    total_rows: totalRows,
+    files_total: totalFiles,
+    files_checked: job.recent_files_count,
+    active_jobs: job.total_active_jobs,
+    expected_jobs: job.expected_jobs_count,
+    job_coverage_rate: job.job_coverage_rate,
+  };
+  return `
+    <div class="failure-s3-metrics">
+      <div class="failure-primary-label">S3 / Parquet metrics</div>
+      ${renderS3MetricsGrid(detail, { showFiles: true, showRows: true })}
+    </div>
+  `;
+}
+
 function formatDelta(oldVal, newVal, decimals = 2) {
   const diff = newVal - oldVal;
   if (Math.abs(diff) < Math.pow(10, -decimals)) return "";
@@ -495,12 +591,34 @@ function renderFailureContext(report) {
     `;
   }
   if (report.validation_type === "s3") {
+    const job = report.job || {};
+    const sub = report.submission || {};
+    const totalFiles = job.total_files_count || 0;
+    const totalRows = job.total_rows || 0;
+    const avgRows =
+      job.avg_rows_per_file ??
+      (totalFiles > 0 ? (totalRows / totalFiles).toFixed(1) : "—");
     return `
-      <details class="failure-context-details">
+      <details class="failure-context-details" open>
         <summary>S3 / parquet context</summary>
         <div class="failure-context-body">
-          <pre>${escapeHtml(formatJsonBlock(report.job))}</pre>
-          ${report.submission ? `<pre>${escapeHtml(formatJsonBlock(report.submission))}</pre>` : ""}
+          ${renderS3MetricsGrid(
+            {
+              total_size_mb: sub.total_size_mb,
+              effective_size_mb: sub.effective_size_mb,
+              avg_rows_per_file: avgRows,
+              total_rows: totalRows,
+              files_total: totalFiles,
+              files_checked: job.recent_files_count,
+              active_jobs: job.total_active_jobs,
+              expected_jobs: job.expected_jobs_count,
+              job_coverage_rate: job.job_coverage_rate,
+            },
+            { showFiles: true, showRows: true }
+          )}
+          <div style="margin-top:0.75rem"><strong>Job match:</strong> ${escapeHtml(formatPctValue(job.job_match_rate))}</div>
+          <div><strong>Scraper success:</strong> ${escapeHtml(formatPctValue(job.scraper_success_rate))}</div>
+          <div><strong>Duplicate rate:</strong> ${escapeHtml(formatPctValue(job.duplicate_percentage))}</div>
         </div>
       </details>
     `;
@@ -540,6 +658,8 @@ function renderFailureCard(report) {
       <div class="failure-primary-label">Validation failure messages</div>
       ${renderPrimaryFailureMessages(report)}
     </div>
+
+    ${renderS3FailureMetrics(report)}
 
     ${entityResultsHtml}
 
@@ -673,7 +793,7 @@ function renderPathCard(path, stats, cumulative = false) {
       <div class="stats-bar"><div class="stats-bar-fill pass" style="width:${pctBar(entPassed, entChecked)}%"></div></div>
     </div>
     ${entTotal !== entChecked ? `<div class="stats-metric-row" style="color:var(--muted);font-size:0.72rem">In bucket/submission: ${entTotal}</div>` : ""}
-    ${path === "s3" && s.detail?.files_checked !== undefined ? `<div class="stats-metric-row" style="color:var(--muted);font-size:0.72rem">Files checked: ${s.detail.files_checked}</div>` : ""}
+    ${path === "s3" ? renderS3MetricsGrid(s.detail || {}, { showFiles: true, showRows: true }) : ""}
     ${path === "od" && s.detail?.credibility_bumped ? `<div class="stats-metric-row" style="color:var(--muted);font-size:0.72rem">Credibility-bumped jobs: ${s.detail.credibility_bumped}</div>` : ""}
     ${!cumulative && s.last_timestamp ? `<div style="font-size:0.7rem;color:var(--muted);margin-top:0.35rem">${formatTime(s.last_timestamp)}</div>` : ""}
   `;
@@ -683,6 +803,50 @@ function renderPathCard(path, stats, cumulative = false) {
 function renderRatioCell(passed, total) {
   const cls = passed === total && total > 0 ? "pass-cell" : passed < total ? "fail-cell" : "";
   return `<span class="${cls}">${formatRatio(passed, total)}</span>`;
+}
+
+function renderS3ParquetTable() {
+  const tbody = document.getElementById("s3-parquet-body");
+  if (!tbody) return;
+
+  const miners = [...validationStatsState.miners].sort((a, b) => a.uid - b.uid);
+  const withS3 = miners.filter((m) => {
+    const d = m.s3?.detail || {};
+    return (
+      m.s3?.last_status !== "pending" ||
+      d.total_size_mb > 0 ||
+      d.effective_size_mb > 0 ||
+      d.job_coverage_rate > 0
+    );
+  });
+
+  tbody.innerHTML = "";
+  if (!withS3.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="9" class="muted-text">No S3 validation data yet — waiting for parquet check.</td></tr>';
+    return;
+  }
+
+  withS3.forEach((m) => {
+    const s3 = m.s3 || {};
+    const d = s3.detail || {};
+    const status = s3.last_status || "pending";
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.innerHTML = `
+      <td>${m.uid}</td>
+      <td><span class="stats-status ${status}">${status}</span></td>
+      <td>${formatSizeMB(d.total_size_mb)}</td>
+      <td>${formatSizeMB(d.effective_size_mb)}</td>
+      <td>${d.avg_rows_per_file != null ? Number(d.avg_rows_per_file).toFixed(1) : "—"}</td>
+      <td>${d.total_rows != null ? Number(d.total_rows).toLocaleString() : "—"}</td>
+      <td>${d.files_total != null ? `${d.files_checked ?? "?"}/${d.files_total}` : "—"}</td>
+      <td>${d.active_jobs != null && d.expected_jobs != null ? `${d.active_jobs}/${d.expected_jobs} (${formatPctValue(d.job_coverage_rate)})` : formatPctValue(d.job_coverage_rate)}</td>
+      <td>${formatTime(m.last_updated || s3.last_timestamp)}</td>
+    `;
+    tr.addEventListener("click", () => renderMinerStatsDetail(m));
+    tbody.appendChild(tr);
+  });
 }
 
 function renderValidationStats() {
@@ -733,6 +897,7 @@ function renderValidationStats() {
   if (updatedEl) {
     updatedEl.textContent = `Last update: ${formatTime(new Date().toISOString())}`;
   }
+  renderS3ParquetTable();
 }
 
 function renderMinerStatsDetail(miner) {
@@ -852,6 +1017,7 @@ function renderScoreRow(row) {
     <td class="metric-cell" data-metric="chain_incentive">${row.chain_incentive.toFixed(6)} ${formatDelta(prev.chain_incentive ?? row.chain_incentive, row.chain_incentive, 6)}</td>
     <td class="metric-cell" data-metric="credibility">${row.credibility.toFixed(3)} ${formatDelta(prev.credibility ?? row.credibility, row.credibility, 3)}</td>
     <td class="metric-cell" data-metric="s3_boost">${row.s3_boost.toFixed(0)} ${formatDelta(prev.s3_boost ?? row.s3_boost, row.s3_boost, 0)}</td>
+    <td class="metric-cell" data-metric="effective_size_mb">${formatSizeMB(row.effective_size_mb)} ${formatDelta(prev.effective_size_mb ?? row.effective_size_mb ?? 0, row.effective_size_mb ?? 0, 1)}</td>
     <td class="metric-cell" data-metric="od_boost">${row.od_boost.toFixed(0)} ${formatDelta(prev.od_boost ?? row.od_boost, row.od_boost, 0)}</td>
     <td class="metric-cell" data-metric="scorable_bytes">${(row.scorable_bytes / 1e6).toFixed(2)}M ${formatDelta((prev.scorable_bytes ?? row.scorable_bytes) / 1e6, row.scorable_bytes / 1e6, 2)}</td>
   `;
@@ -897,6 +1063,13 @@ function feedEventSummary(event) {
   }
   if (event.event_type === "od_job_created") {
     summary = event.data?.message || `job ${(event.data?.job_id || "").slice(0, 8)}… labels=${event.data?.labels || ""}`;
+  }
+  if (event.event_type === "eval_s3_complete") {
+    const d = event.data || {};
+    summary =
+      `${d.is_valid ? "passed" : "failed"} · parquet ${formatSizeMB(d.total_size_mb)} · ` +
+      `effective ${formatSizeMB(d.effective_size_mb)} · coverage ${formatPctValue(d.job_coverage_rate)} · ` +
+      `rows/file ${d.avg_rows_per_file ?? "—"}`;
   }
   if (!summary) summary = JSON.stringify(event.data || {}).slice(0, 120);
   return summary;
@@ -1007,6 +1180,21 @@ function applyFeedEventSideEffects(event) {
     } else {
       renderFailuresPagination();
     }
+  }
+
+  if (event.event_type === "validation_stats_updated" && event.data?.miner) {
+    const miner = event.data.miner;
+    const idx = validationStatsState.miners.findIndex((m) => m.uid === miner.uid);
+    if (idx >= 0) validationStatsState.miners[idx] = miner;
+    else validationStatsState.miners.push(miner);
+    if (event.data.session) validationStatsState.session = event.data.session;
+    if (document.getElementById("tab-stats")?.classList.contains("active")) {
+      renderValidationStats();
+    }
+  }
+
+  if (event.event_type === "score_updated" && event.data) {
+    applyScoreSnapshot(event.data);
   }
 
   if (event.event_type === "scores_reset") {

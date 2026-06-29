@@ -42,6 +42,7 @@ def build_miner_score_row(
             "od_boost": float(scorer.ondemand_boosts[uid].item()),
             "od_credibility": float(scorer.ondemand_credibility[uid].item()),
             "scorable_bytes": float(scorer.scorable_bytes[uid].item()),
+            "effective_size_mb": float(scorer.effective_sizes[uid].item()) / (1024 * 1024),
             "capped_score": components["capped_score"],
             "p2p_component": components["p2p_component"],
             "s3_component": components["s3_component"],

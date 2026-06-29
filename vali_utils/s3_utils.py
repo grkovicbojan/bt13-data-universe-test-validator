@@ -131,6 +131,10 @@ class S3ValidationResult:
     effective_size_bytes: float = 0.0
     job_coverage_rate: float = 0.0
 
+    # Parquet inventory (active jobs only, from filenames + file listing)
+    total_rows: int = 0
+    total_files_count: int = 0
+
 
 # Mapping of scrapers to use based on the data source to validate.
 # Reddit must match MinerEvaluator.PREFERRED_SCRAPERS — miners upload DOM-scraped data.
@@ -295,6 +299,7 @@ class DuckDBSampledValidator:
                     total_rows_from_filenames += job_rows
 
             job_coverage_rate = (len(active_job_ids) / len(expected_jobs) * 100) if expected_jobs else 0
+            total_files_count = sum(len(files_by_job[jid]) for jid in active_job_ids)
 
             if empty_files_skipped > 0:
                 bt.logging.warning(
@@ -565,7 +570,9 @@ class DuckDBSampledValidator:
                 sample_validation_results=scraper_result.get('sample_results', []),
                 sample_job_mismatches=job_match_result.get('mismatch_samples', []),
                 effective_size_bytes=effective_size_bytes,
-                job_coverage_rate=job_coverage_rate
+                job_coverage_rate=job_coverage_rate,
+                total_rows=total_rows_from_filenames,
+                total_files_count=total_files_count,
             )
 
         except Exception as e:
@@ -1701,7 +1708,9 @@ class DuckDBSampledValidator:
             sample_validation_results=[],
             sample_job_mismatches=[],
             effective_size_bytes=0.0,
-            job_coverage_rate=0.0
+            job_coverage_rate=0.0,
+            total_rows=0,
+            total_files_count=0,
         )
 
     def close(self):

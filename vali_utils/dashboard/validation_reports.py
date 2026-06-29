@@ -593,6 +593,12 @@ def record_s3_failure(uid: int, hotkey: str, result: Any) -> None:
                 "total_active_jobs": getattr(result, "total_active_jobs", 0),
                 "expected_jobs_count": getattr(result, "expected_jobs_count", 0),
                 "recent_files_count": getattr(result, "recent_files_count", 0),
+                "total_files_count": getattr(result, "total_files_count", 0),
+                "total_rows": getattr(result, "total_rows", 0),
+                "avg_rows_per_file": round(
+                    getattr(result, "total_rows", 0) / max(getattr(result, "total_files_count", 0), 1),
+                    1,
+                ),
                 "job_coverage_rate": getattr(result, "job_coverage_rate", 0),
                 "job_match_rate": getattr(result, "job_match_rate", 0),
                 "scraper_success_rate": getattr(result, "scraper_success_rate", 0),

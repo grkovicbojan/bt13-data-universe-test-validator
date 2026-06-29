@@ -234,6 +234,11 @@ def record_s3_stats(
     entities_passed = int(getattr(result, "entities_passed_scraper", 0) or 0)
     jobs_total = int(getattr(result, "total_active_jobs", 0) or 0)
     files_checked = int(getattr(result, "recent_files_count", 0) or 0)
+    total_size_bytes = int(getattr(result, "total_size_bytes", 0) or 0)
+    effective_size_bytes = float(getattr(result, "effective_size_bytes", 0) or 0)
+    total_rows = int(getattr(result, "total_rows", 0) or 0)
+    total_files = int(getattr(result, "total_files_count", 0) or 0)
+    avg_rows_per_file = round(total_rows / total_files, 1) if total_files > 0 else 0.0
 
     get_validation_stats().record(
         uid,
@@ -253,7 +258,9 @@ def record_s3_stats(
                 "is_valid": is_valid,
                 "validation_pct": float(getattr(result, "validation_percentage", 0) or 0),
                 "expected_jobs": int(getattr(result, "expected_jobs_count", 0) or 0),
+                "active_jobs": jobs_total,
                 "files_checked": files_checked,
+                "files_total": total_files,
                 "job_coverage_rate": float(getattr(result, "job_coverage_rate", 0) or 0),
                 "job_match_rate": float(getattr(result, "job_match_rate", 0) or 0),
                 "scraper_success_rate": float(getattr(result, "scraper_success_rate", 0) or 0),
@@ -261,6 +268,11 @@ def record_s3_stats(
                 "entities_checked_job_match": int(
                     getattr(result, "entities_checked_for_job_match", 0) or 0
                 ),
+                "total_size_mb": total_size_bytes / (1024 * 1024),
+                "effective_size_mb": effective_size_bytes / (1024 * 1024),
+                "total_rows": total_rows,
+                "total_files_count": total_files,
+                "avg_rows_per_file": avg_rows_per_file,
                 "reason": getattr(result, "reason", ""),
             },
         ),

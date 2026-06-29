@@ -152,6 +152,7 @@
                   <th>Chain Incentive</th>
                   <th>Credibility</th>
                   <th>S3 Boost</th>
+                  <th>Effective Size</th>
                   <th>OD Boost</th>
                   <th>Scorable Bytes</th>
                 </tr>
@@ -187,6 +188,30 @@
             </table>
           </div>
           <div id="stats-miner-detail" class="stats-detail-panel"></div>
+          <h3 class="stats-section-title">S3 / Parquet (latest validation)</h3>
+          <p class="od-section-desc" style="margin-top:0;margin-bottom:0.75rem">
+            Parquet size, competition effective size, average rows per file, and job coverage from the most recent S3 check per miner.
+          </p>
+          <div class="table-wrap">
+            <table class="stats-table" id="s3-parquet-table">
+              <thead>
+                <tr>
+                  <th>UID</th>
+                  <th>Status</th>
+                  <th>Parquet Size</th>
+                  <th>Effective Size</th>
+                  <th>Rows / File</th>
+                  <th>Total Rows</th>
+                  <th>Files</th>
+                  <th>Job Coverage</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="s3-parquet-body">
+                <tr><td colspan="9" class="muted-text">No S3 validation data yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div id="tab-charts" class="tab-content panel-body">
@@ -546,6 +571,6 @@
 
   <div id="toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;padding:0.75rem 1.25rem;border-radius:8px;color:white;font-size:0.875rem;z-index:100"></div>
 
-  <script src="/dashboard/static/app.js?v=31"></script>
+  <script src="/dashboard/static/app.js?v=32"></script>
 </body>
 </html>

@@ -1330,6 +1330,15 @@ class MinerEvaluator:
             "validation_pct": s3_validation_result.validation_percentage,
             "reason": s3_validation_result.reason,
             "effective_size_mb": s3_validation_result.effective_size_bytes / (1024 * 1024),
+            "total_size_mb": s3_validation_result.total_size_bytes / (1024 * 1024),
+            "job_coverage_rate": s3_validation_result.job_coverage_rate,
+            "total_rows": s3_validation_result.total_rows,
+            "total_files_count": s3_validation_result.total_files_count,
+            "avg_rows_per_file": round(
+                s3_validation_result.total_rows
+                / max(s3_validation_result.total_files_count, 1),
+                1,
+            ),
             "issues": list(s3_validation_result.validation_issues or [])[:5],
             "jobs_total": s3_validation_result.total_active_jobs,
             "jobs_checked": s3_validation_result.recent_files_count,
