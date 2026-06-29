@@ -8,7 +8,9 @@ const API = "";
 let eventSource = null;
 const scoreState = new Map();
 const failureReports = [];
-const MAX_FAILURE_REPORTS = 100;
+let failureReportsPageNum = 1;
+let failureReportsTotal = 0;
+const FAILURE_REPORTS_PAGE_SIZE = 20;
 function emptyPathStats(path) {
   return {
     path,
@@ -558,14 +560,6 @@ function renderFailureCard(report) {
   return card;
 }
 
-function upsertFailureReport(report) {
-  if (!report || !report.id) return;
-  const idx = failureReports.findIndex((r) => r.id === report.id);
-  if (idx >= 0) failureReports[idx] = report;
-  else failureReports.unshift(report);
-  while (failureReports.length > MAX_FAILURE_REPORTS) failureReports.pop();
-}
-
 function updateFailuresTabBadge(count) {
   const tab = document.querySelector('.tab[data-tab="tab-failures"]');
   if (!tab) return;
@@ -577,29 +571,52 @@ function renderFailuresList() {
   const countEl = document.getElementById("failures-count");
   if (!list) return;
 
-  const typeFilter = document.getElementById("failure-type-filter")?.value || "";
-  const uidFilter = document.getElementById("failure-uid-filter")?.value || "";
-  let items = [...failureReports];
-  if (typeFilter) items = items.filter((r) => r.validation_type === typeFilter);
-  if (uidFilter) items = items.filter((r) => String(r.uid) === uidFilter);
-  items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
   list.innerHTML = "";
-  if (!items.length) {
-    list.innerHTML = '<p class="muted-text">No validation failures match the current filters.</p>';
+  if (!failureReports.length) {
+    list.innerHTML = failureReportsTotal
+      ? '<p class="muted-text">No validation failures on this page.</p>'
+      : '<p class="muted-text">No validation failures match the current filters.</p>';
   } else {
-    items.forEach((r) => list.appendChild(renderFailureCard(r)));
+    failureReports.forEach((r) => list.appendChild(renderFailureCard(r)));
   }
-  if (countEl) countEl.textContent = `${items.length} report(s)`;
-  updateFailuresTabBadge(items.length);
+  if (countEl) {
+    countEl.textContent = failureReportsTotal
+      ? `${failureReportsTotal} report(s)`
+      : "";
+  }
+  updateFailuresTabBadge(failureReportsTotal);
+  renderFailuresPagination();
 }
 
-function updateFailureUidOptions(rows) {
+function renderFailuresPagination() {
+  const bar = document.getElementById("failure-pagination");
+  const info = document.getElementById("failure-page-info");
+  const prev = document.getElementById("failure-prev-page");
+  const next = document.getElementById("failure-next-page");
+  if (!bar) return;
+
+  if (!failureReportsTotal) {
+    bar.style.display = "none";
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(failureReportsTotal / FAILURE_REPORTS_PAGE_SIZE));
+  bar.style.display = "flex";
+  if (info) {
+    info.textContent = `Page ${failureReportsPageNum} of ${totalPages} (${failureReportsTotal} total)`;
+  }
+  if (prev) prev.disabled = failureReportsPageNum <= 1;
+  if (next) next.disabled = failureReportsPageNum >= totalPages;
+}
+
+function updateFailureUidOptions(extraUids = []) {
   const select = document.getElementById("failure-uid-filter");
   if (!select) return;
   const current = select.value;
-  const uids = new Set(rows.map((r) => r.uid));
+  const uids = new Set();
+  validationStatsState.miners.forEach((m) => uids.add(m.uid));
   failureReports.forEach((r) => uids.add(r.uid));
+  extraUids.forEach((uid) => uids.add(uid));
   select.innerHTML = '<option value="">All miners</option>';
   [...uids].sort((a, b) => a - b).forEach((uid) => {
     const opt = document.createElement("option");
@@ -737,46 +754,45 @@ async function loadValidationStats() {
     validationStatsState.miners = data.miners || [];
     validationStatsState.session = data.session || emptyValidationStatsSession();
     renderValidationStats();
+    updateFailureUidOptions();
   } catch (e) {
     console.error("Validation stats load failed:", e);
   }
 }
 
-let failureReportsOffset = 0;
-const FAILURE_REPORTS_PAGE = 100;
+async function loadValidationFailures(goToPage = null) {
+  const list = document.getElementById("failures-list");
+  if (goToPage !== null) failureReportsPageNum = Math.max(1, goToPage);
 
-async function loadValidationFailures(reset = true) {
   try {
-    if (reset) failureReportsOffset = 0;
+    if (list) list.classList.add("loading");
     const type = document.getElementById("failure-type-filter")?.value || "";
     const uid = document.getElementById("failure-uid-filter")?.value || "";
+    const offset = (failureReportsPageNum - 1) * FAILURE_REPORTS_PAGE_SIZE;
     const params = new URLSearchParams({
-      limit: String(FAILURE_REPORTS_PAGE),
-      offset: String(failureReportsOffset),
+      limit: String(FAILURE_REPORTS_PAGE_SIZE),
+      offset: String(offset),
     });
     if (type) params.set("validation_type", type);
     if (uid) params.set("uid", uid);
     const data = await api(`/dashboard/api/validation-failures?${params}`);
-    if (reset) failureReports.length = 0;
-    (data.failures || [])
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .forEach((r) => upsertFailureReport(r));
-    renderFailuresList();
-    const loadMoreBtn = document.getElementById("load-more-failures");
-    if (loadMoreBtn) {
-      const total = data.total ?? failureReports.length;
-      const loaded = failureReportsOffset + (data.failures || []).length;
-      loadMoreBtn.style.display = loaded < total ? "inline-block" : "none";
-      loadMoreBtn.textContent = `Load more (${loaded}/${total})`;
+    failureReports.length = 0;
+    (data.failures || []).forEach((r) => failureReports.push(r));
+    failureReportsTotal = data.total ?? failureReports.length;
+
+    const totalPages = Math.max(1, Math.ceil(failureReportsTotal / FAILURE_REPORTS_PAGE_SIZE));
+    if (failureReportsTotal > 0 && failureReportsPageNum > totalPages) {
+      await loadValidationFailures(totalPages);
+      return;
     }
+
+    updateFailureUidOptions();
+    renderFailuresList();
   } catch (e) {
     console.error("Validation failures load failed:", e);
+  } finally {
+    if (list) list.classList.remove("loading");
   }
-}
-
-async function loadMoreValidationFailures() {
-  failureReportsOffset += FAILURE_REPORTS_PAGE;
-  await loadValidationFailures(false);
 }
 
 async function clearValidationFailures() {
@@ -793,6 +809,8 @@ async function clearValidationFailures() {
       body: JSON.stringify({}),
     });
     failureReports.length = 0;
+    failureReportsTotal = 0;
+    failureReportsPageNum = 1;
     renderFailuresList();
     showToast(result.message || "Validation failure history cleared.");
   } catch (e) {
@@ -849,7 +867,7 @@ function updateScoresTable(rows) {
   tbody.innerHTML = "";
   sorted.forEach((row) => tbody.appendChild(renderScoreRow(row)));
   updateChartUidOptions(sorted);
-  updateFailureUidOptions(sorted);
+  updateFailureUidOptions(sorted.map((r) => r.uid));
   if (charts.timeline) refreshCharts();
   document.getElementById("last-update").textContent =
     `Last update: ${formatTime(new Date().toISOString())}`;
@@ -981,8 +999,14 @@ function renderFeed() {
 
 function applyFeedEventSideEffects(event) {
   if (event.event_type === "validation_failure" && event.data) {
-    upsertFailureReport(event.data);
-    updateFailuresTabBadge(failureReports.length);
+    failureReportsTotal += 1;
+    updateFailuresTabBadge(failureReportsTotal);
+    const failuresTab = document.getElementById("tab-failures");
+    if (failuresTab?.classList.contains("active") && failureReportsPageNum === 1) {
+      loadValidationFailures(1);
+    } else {
+      renderFailuresPagination();
+    }
   }
 
   if (event.event_type === "scores_reset") {
@@ -1159,6 +1183,8 @@ function handleScoresReset(data, options = {}) {
   scoreHistory.clear();
   prevValues.clear();
   failureReports.length = 0;
+  failureReportsTotal = 0;
+  failureReportsPageNum = 1;
   applyValidationStatsReset(data);
   destroyCharts();
   if (data?.scores?.length) {
@@ -2412,10 +2438,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("clear-od-jobs")?.addEventListener("click", clearOdJobs);
   document.getElementById("refresh-od-submissions")?.addEventListener("click", loadOdSubmissions);
   document.getElementById("clear-miner-submissions")?.addEventListener("click", clearMinerSubmissions);
-  document.getElementById("refresh-failures")?.addEventListener("click", () => loadValidationFailures(true));
-  document.getElementById("load-more-failures")?.addEventListener("click", loadMoreValidationFailures);
+  document.getElementById("refresh-failures")?.addEventListener("click", () => loadValidationFailures(1));
+  document.getElementById("failure-prev-page")?.addEventListener("click", () => {
+    if (failureReportsPageNum > 1) loadValidationFailures(failureReportsPageNum - 1);
+  });
+  document.getElementById("failure-next-page")?.addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(failureReportsTotal / FAILURE_REPORTS_PAGE_SIZE));
+    if (failureReportsPageNum < totalPages) loadValidationFailures(failureReportsPageNum + 1);
+  });
   document.getElementById("clear-validation-failures")?.addEventListener("click", clearValidationFailures);
   document.getElementById("clear-feed")?.addEventListener("click", clearFeedHistory);
-  document.getElementById("failure-type-filter")?.addEventListener("change", () => loadValidationFailures(true));
-  document.getElementById("failure-uid-filter")?.addEventListener("change", () => loadValidationFailures(true));
+  document.getElementById("failure-type-filter")?.addEventListener("change", () => loadValidationFailures(1));
+  document.getElementById("failure-uid-filter")?.addEventListener("change", () => loadValidationFailures(1));
 });

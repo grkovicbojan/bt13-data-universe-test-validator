@@ -235,9 +235,13 @@
               <option value="">All miners</option>
             </select>
             <button type="button" id="refresh-failures" class="secondary">Refresh</button>
-            <button type="button" id="load-more-failures" class="secondary" style="display:none">Load more</button>
             <button type="button" id="clear-validation-failures" class="danger">Clear History</button>
             <span id="failures-count" class="muted-text"></span>
+          </div>
+          <div id="failure-pagination" class="failure-pagination" style="display:none">
+            <button type="button" id="failure-prev-page" class="secondary">Previous</button>
+            <span id="failure-page-info" class="muted-text"></span>
+            <button type="button" id="failure-next-page" class="secondary">Next</button>
           </div>
           <small class="muted-text failure-clear-hint">
             History is stored in PostgreSQL when DATABASE_URL is set; otherwise in-memory only.
@@ -542,6 +546,6 @@
 
   <div id="toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;padding:0.75rem 1.25rem;border-radius:8px;color:white;font-size:0.875rem;z-index:100"></div>
 
-  <script src="/dashboard/static/app.js?v=30"></script>
+  <script src="/dashboard/static/app.js?v=31"></script>
 </body>
 </html>

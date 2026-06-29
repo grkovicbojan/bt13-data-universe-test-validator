@@ -644,6 +644,29 @@ input[type="datetime-local"] {
   margin-bottom: 1rem;
 }
 
+.failure-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  flex-wrap: wrap;
+}
+
+.failure-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#failure-page-info {
+  font-size: 0.82rem;
+  min-width: 12rem;
+}
+
+.failures-list.loading {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .failure-toolbar label {
   margin: 0;
 }
